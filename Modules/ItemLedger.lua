@@ -162,13 +162,18 @@ function ItemLedger:Print()
     local report = self:BuildReport()
     if #report == 0 then DWM:Print(L["LEDGER_EMPTY"]); return end
     local g = DWM.db.global
+    local haveWarband = g.warband ~= nil
     DWM:Print(L["LEDGER_HEADER"]:format(
         (g.warband and self:Age(g.warband.scannedAt)) or L["LEDGER_NEVER"],
         (g.warband and g.warband.scannedBy) or "?"))
+    if not haveWarband then DWM:Print("|cFFFFCC00" .. L["LEDGER_HINT_BANK"] .. "|r") end
     for _, r in ipairs(report) do
+        -- Honest status: never claim "OK" while data is missing/unknown.
         local tag
         if r.shortBy > 0 then
             tag = "|cFFFF5555" .. L["LEDGER_SHORT"]:format(r.shortBy) .. "|r"
+        elseif (not haveWarband) or r.unknown > 0 then
+            tag = "|cFFFFCC00" .. L["LEDGER_NODATA"] .. "|r"
         else
             tag = "|cFF55FF55" .. L["LEDGER_OK"] .. "|r"
         end
