@@ -137,6 +137,17 @@ local function CurrentSummary()
     if rec and rec.managed == false then
         s = s .. "\n|cFFFF8080" .. L["STATUS_UNMANAGED"] .. "|r"
     end
+    -- §14.6(b): account-wide unmet demand under the live summary.
+    local short = ns.ItemLedger and ns.ItemLedger:ShortItems() or {}
+    if #short > 0 then
+        local parts = {}
+        for i = 1, math.min(5, #short) do
+            parts[#parts + 1] = short[i].name .. " x" .. short[i].short
+        end
+        if #short > 5 then parts[#parts + 1] = "(+" .. (#short - 5) .. ")" end
+        s = s .. "\n|cFFFF5555" .. L["SUMMARY_UNMET"]:format(
+            table.concat(parts, ", ")) .. "|r"
+    end
     return s
 end
 

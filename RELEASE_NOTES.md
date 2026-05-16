@@ -18,6 +18,8 @@ Phase 5/6 - account-wide item management + profession-conditioned items
 - **Fixed: entering a gold value in the options panel errored** ("base out
   of range") and silently failed - a `tonumber(gsub(...))` mistake. Gold
   inputs now parse correctly.
+- Account-wide shortages now also surface passively: an "Unmet demand" line
+  at the top of the options panel and on the minimap/broker tooltip.
 - **Bank-side config button.** A small draggable button appears while the
   bank is open; click to open options, right-click to pause/resume, drag to
   reposition (saved). Frame-independent, so it works with Baganator, Bagnon,

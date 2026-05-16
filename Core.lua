@@ -294,6 +294,16 @@ local function BuildBroker()
             if rec and rec.managed == false then
                 tt:AddLine("|cFFFF8080" .. L["STATUS_UNMANAGED"] .. "|r")
             end
+            -- §14.6(c): account-wide item shortages, up to 3 worst.
+            local short = ns.ItemLedger and ns.ItemLedger:ShortItems() or {}
+            if #short > 0 then
+                tt:AddLine(" ")
+                tt:AddLine("|cFFFF5555" .. L["BROKER_ITEMS_SHORT"]:format(#short) .. "|r")
+                for i = 1, math.min(3, #short) do
+                    tt:AddDoubleLine("  " .. short[i].name,
+                        "|cFFFF5555-" .. short[i].short .. "|r")
+                end
+            end
             tt:AddLine(" ")
             tt:AddLine("|cFFAAAAAA" .. L["BROKER_LEFT_CLICK"] .. "|r")
             tt:AddLine("|cFFAAAAAA" .. L["BROKER_RIGHT_CLICK"] .. "|r")

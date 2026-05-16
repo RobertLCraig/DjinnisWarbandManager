@@ -154,6 +154,19 @@ function ItemLedger:BuildReport()
     return report
 end
 
+-- Account-wide shorted items, worst first: { {name, short}, ... } (§14.6).
+-- Shared by the panel summary and the broker tooltip.
+function ItemLedger:ShortItems()
+    local out = {}
+    for _, r in ipairs(self:BuildReport()) do
+        if (r.shortBy or 0) > 0 then
+            out[#out + 1] = { name = r.name, short = r.shortBy }
+        end
+    end
+    table.sort(out, function(a, b) return a.short > b.short end)
+    return out
+end
+
 --============================================================================
 -- Chat print (primary testable entry point - /dwm ledger, §14.6d)
 --============================================================================
