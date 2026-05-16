@@ -24,7 +24,11 @@ local PRESETS = {
     -- Vellum uses "exact": a Crafter should be topped back up to 500 from the
     -- warband when low (the original "always have at least 500" requirement),
     -- not merely have surplus skimmed. keepmin never withdraws by design.
-    { name = "Crafter",  gold = 20000, items = { [38682] = { qty = 500, mode = "exact" } } },
+    -- Vellum gated to Enchanting (skill-line 333, §15.4): a Crafter without
+    -- Enchanting won't stock it. Forward-safe seeding won't add the gate to an
+    -- already-seeded Crafter - existing profiles set it via /dwm purposeitemprof.
+    { name = "Crafter",  gold = 20000,
+      items = { [38682] = { qty = 500, mode = "exact", prof = 333 } } },
     { name = "Gatherer", gold = 10000 },
     { name = "Leveling", gold = 2000 },
     { name = "Mule",     gold = 0, mule = true },
@@ -50,7 +54,8 @@ function Purposes:Seed()
                 if preset.items then
                     entry.items = {}
                     for id, spec in pairs(preset.items) do
-                        entry.items[id] = { qty = spec.qty, mode = spec.mode }
+                        entry.items[id] = { qty = spec.qty, mode = spec.mode,
+                                            prof = spec.prof, minSkill = spec.minSkill }
                     end
                 end
                 p.purposes[preset.name] = entry
@@ -136,7 +141,25 @@ function Purposes:SetItem(purposeName, itemID, qty, mode)
     mode = VALID_MODES[mode] and mode or "keepmin"
     qty = math.max(0, math.floor(tonumber(qty) or 0))
     e.items = e.items or {}
-    e.items[itemID] = { qty = qty, mode = mode }
+    -- Preserve any existing profession gate (§15.2) - qty/mode edits must not
+    -- silently drop prof/minSkill.
+    local prev = e.items[itemID]
+    e.items[itemID] = {
+        qty = qty, mode = mode,
+        prof = prev and prev.prof, minSkill = prev and prev.minSkill,
+    }
+    return true
+end
+
+-- §15.2: set/clear the profession gate on an existing item target.
+-- prof = skill-line id, or nil to clear the gate.
+function Purposes:SetItemProf(purposeName, itemID, prof, minSkill)
+    local e = DWM.db.profile.purposes[purposeName]
+    if not e or not e.items then return false, "missing" end
+    local it = e.items[tonumber(itemID) or -1]
+    if not it then return false, "noitem" end
+    it.prof = prof or nil
+    it.minSkill = (prof and minSkill and minSkill > 0) and math.floor(minSkill) or nil
     return true
 end
 
@@ -147,9 +170,23 @@ function Purposes:DelItem(purposeName, itemID)
     return true
 end
 
--- Merged item targets for ANY roster record (§14.2):
--- the record's purpose.items, then its itemOverrides win (false = unmanage).
--- Returns { [itemID] = { qty, mode } }
+-- Is this character allowed the item given its profession gate (§15.3)?
+-- No gate -> yes. Gated + professions unknown (alt never snapshotted) -> no
+-- (don't manage what we can't confirm; consistent with itemCounts "unknown").
+local function ProfOK(rec, spec)
+    if not spec.prof then return true end
+    local profs = rec.professions
+    if not profs then return false end
+    local rank = profs[spec.prof]
+    if rank == nil then return false end
+    if spec.minSkill and rank < spec.minSkill then return false end
+    return true
+end
+
+-- Merged item targets for ANY roster record (§14.2 / §15.3):
+-- the record's purpose.items, then its itemOverrides win (false = unmanage),
+-- then profession-gated items the character can't make are dropped.
+-- Returns { [itemID] = { qty, mode, prof, minSkill } }
 function Purposes:ResolveItemsFor(rec)
     local prof = DWM.db.profile
     local out  = {}
@@ -159,7 +196,8 @@ function Purposes:ResolveItemsFor(rec)
     local p = prof.purposes[pname] or prof.purposes[prof.defaultPurpose]
     if p and p.items then
         for id, spec in pairs(p.items) do
-            out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin" }
+            out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin",
+                        prof = spec.prof, minSkill = spec.minSkill }
         end
     end
     if rec.itemOverrides then
@@ -167,9 +205,14 @@ function Purposes:ResolveItemsFor(rec)
             if spec == false then
                 out[id] = nil                       -- explicitly unmanaged here
             elseif type(spec) == "table" then
-                out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin" }
+                out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin",
+                            prof = spec.prof, minSkill = spec.minSkill }
             end
         end
+    end
+    -- Profession gate (after override merge so an override's own gate wins).
+    for id, spec in pairs(out) do
+        if not ProfOK(rec, spec) then out[id] = nil end
     end
     return out
 end

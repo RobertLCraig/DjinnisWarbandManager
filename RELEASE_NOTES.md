@@ -12,8 +12,17 @@
 
 ## Version: 0.3.2
 
-Phase 5 - account-wide item management (in progress).
+Phase 5/6 - account-wide item management + profession-conditioned items
+(in progress).
 
+- **Profession-conditioned item targets.** An item can require a profession
+  (and optional min skill); each character's professions are recorded on
+  login. The Crafter preset's Enchanting Vellum now requires Enchanting, so a
+  Crafter without it no longer stocks Vellum (multi-profession characters get
+  every set they qualify for). Set gates with
+  `/dwm purposeitemprof <purpose> <link|id> <profession|none> [minSkill]`.
+  (Existing profiles: the gate is added to new installs only - set it on your
+  Crafter once with that command.)
 - **Fixed: a manually-chosen purpose (e.g. Banker/Auctioneer) reverted to a
   profession-detected one after /reload.** Explicit purpose picks are now
   correctly marked user-set and never auto-overridden.

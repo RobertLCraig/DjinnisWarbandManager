@@ -150,6 +150,11 @@ L["OPT_SORTAFTER_NAME"] = "Sort warband bank after item moves"
 L["OPT_SORTAFTER_DESC"] = "After balancing items, run Blizzard's warband bank sort to consolidate the small stacks split moves create. Reorganizes the whole warband bank."
 L["CMD_HELP_LOG"] = "/dwm log - show recent transactions"
 L["CMD_HELP_LEDGER"] = "/dwm ledger - account-wide item supply/demand & shortages"
+L["CMD_HELP_PURPOSEITEMPROF"] = "/dwm purposeitemprof <purpose> <link|id> <profession|none> [minSkill] - gate an item to a profession"
+L["LEDGER_NEEDS_PROF"] = "needs %s"
+L["LEDGER_NONE"] = "none"
+L["MSG_PURPOSE_ITEM_PROF"] = "Purpose '%s': %s now requires %s."
+L["MSG_BAD_PROFESSION"] = "Unknown profession '%s'. Use a name like Enchanting, or 'none'."
 
 -- Phase 5: account-wide item ledger
 L["OPT_LEDGER_NAME"] = "Item supply/demand report"

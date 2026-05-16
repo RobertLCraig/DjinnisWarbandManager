@@ -160,9 +160,15 @@ local function PrintItems()
     DWM:Print(L["MSG_ITEMS_LIST_HEADER"])
     for _, id in ipairs(ids) do
         local s = t[id]
-        DWM:Print(("  %s (%d): %d  |cFFAAAAAA[%s]|r  - have %d"):format(
+        local gate = ""
+        if s.prof then
+            local pn = (ns.PROFESSIONS and ns.PROFESSIONS[s.prof]) or tostring(s.prof)
+            gate = "  |cFF66CCFF" .. L["LEDGER_NEEDS_PROF"]:format(
+                pn .. (s.minSkill and (" " .. s.minSkill) or "")) .. "|r"
+        end
+        DWM:Print(("  %s (%d): %d  |cFFAAAAAA[%s]|r  - have %d%s"):format(
             ItemDisplayName(id), id, s.qty or 0, s.mode or "keepmin",
-            DWM:GetOnCharacterCount(id)))
+            DWM:GetOnCharacterCount(id), gate))
     end
 end
 
@@ -615,6 +621,38 @@ local options = {
                 end
             end,
         },
+        purposeitemprof = {
+            type = "input", order = 114, guiHidden = true,
+            name = "purposeitemprof", usage = "<purpose> <link|id> <profession|none> [minSkill]",
+            get = function() return "" end,
+            set = function(_, v)
+                v = tostring(v):gsub("^%s+", ""):gsub("%s+$", "")
+                local pn, rest = v:match("^(%S+)%s+(.+)$")
+                if not pn or not rest then return end
+                local id = (ParseItemArgs(rest))
+                if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                -- Strip the link/leading id, leaving "<profession> [minSkill]".
+                local tail = rest:gsub("|%x+|Hitem:.-|h%[.-%]|h|r", " ")
+                                  :gsub("|Hitem:.-|h.-|h", " ")
+                                  :gsub("^%s*%d+%s*", " ")
+                                  :gsub("^%s+", ""):gsub("%s+$", "")
+                local profTok, skillTok = tail:match("^(%S+)%s*(%S*)$")
+                local profId = ns.ProfessionNameToId(profTok)
+                if profId == false then
+                    DWM:Print(L["MSG_BAD_PROFESSION"]:format(tostring(profTok))); return
+                end
+                local ms = tonumber(skillTok)
+                if ns.Purposes:SetItemProf(pn, id, profId, ms) then
+                    local label = profId
+                        and ((ns.PROFESSIONS[profId] or profId) .. (ms and (" " .. ms) or ""))
+                        or L["LEDGER_NONE"]
+                    DWM:Print(L["MSG_PURPOSE_ITEM_PROF"]:format(pn, ItemDisplayName(id), label))
+                    ns.RefreshOptions()
+                else
+                    DWM:Print(L["MSG_PURPOSE_MISSING"]:format(pn))
+                end
+            end,
+        },
 
         hdr_actions = { type = "header", order = 30, name = L["OPT_GENERAL"] },
         balance = {
@@ -734,7 +772,7 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_ROSTER"]);   DWM:Print(L["CMD_HELP_STATUS"])
             DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
             DWM:Print(L["CMD_HELP_ITEMLIST"]); DWM:Print(L["CMD_HELP_LOG"])
-            DWM:Print(L["CMD_HELP_LEDGER"])
+            DWM:Print(L["CMD_HELP_LEDGER"]); DWM:Print(L["CMD_HELP_PURPOSEITEMPROF"])
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end
