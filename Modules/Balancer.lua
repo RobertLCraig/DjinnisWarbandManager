@@ -98,8 +98,12 @@ function Balancer:_DoGold(manual, simulate, verbose)
             return
         end
         local ok = pcall(C_Bank.WithdrawMoney, BANKTYPE_ACCOUNT, needed)
-        DWM:Print(ok and L["MSG_WITHDREW"]:format(DWM:FormatMoney(needed))
-                     or L["MSG_WITHDRAW_FAILED"])
+        if ok then
+            local m = L["MSG_WITHDREW"]:format(DWM:FormatMoney(needed))
+            DWM:Print(m); DWM:LogTxn(m)
+        else
+            DWM:Print(L["MSG_WITHDRAW_FAILED"])
+        end
         return
     end
 
@@ -132,11 +136,9 @@ function Balancer:_DoGold(manual, simulate, verbose)
 
         local ok = pcall(C_Bank.DepositMoney, BANKTYPE_ACCOUNT, excess)
         if ok then
-            if capped then
-                DWM:Print(L["MSG_DEPOSIT_CAP"]:format(DWM:FormatMoney(excess)))
-            else
-                DWM:Print(L["MSG_DEPOSITED"]:format(DWM:FormatMoney(excess)))
-            end
+            local m = capped and L["MSG_DEPOSIT_CAP"]:format(DWM:FormatMoney(excess))
+                              or  L["MSG_DEPOSITED"]:format(DWM:FormatMoney(excess))
+            DWM:Print(m); DWM:LogTxn(m)
         else
             DWM:Print(L["MSG_DEPOSIT_FAILED"])
         end
@@ -164,11 +166,9 @@ function Balancer:_DoGold(manual, simulate, verbose)
 
         local ok = pcall(C_Bank.WithdrawMoney, BANKTYPE_ACCOUNT, needed)
         if ok then
-            if short then
-                DWM:Print(L["MSG_WITHDRAW_SHORT"]:format(DWM:FormatMoney(needed)))
-            else
-                DWM:Print(L["MSG_WITHDREW"]:format(DWM:FormatMoney(needed)))
-            end
+            local m = short and L["MSG_WITHDRAW_SHORT"]:format(DWM:FormatMoney(needed))
+                            or  L["MSG_WITHDREW"]:format(DWM:FormatMoney(needed))
+            DWM:Print(m); DWM:LogTxn(m)
         else
             DWM:Print(L["MSG_WITHDRAW_FAILED"])
         end

@@ -157,6 +157,25 @@ local function PrintItems()
     end
 end
 
+local function LogLines(maxN)
+    local log = DWM.db.global and DWM.db.global.log or {}
+    local out, n = {}, #log
+    local from = math.max(1, n - (maxN or 25) + 1)
+    for i = from, n do
+        local e = log[i]
+        out[#out + 1] = ("|cFFAAAAAA%s|r |cFF4FC3F7%s|r %s"):format(
+            date("%m-%d %H:%M", e.t or 0), tostring(e.char or "?"), tostring(e.text or ""))
+    end
+    return out
+end
+
+local function PrintLog()
+    local lines = LogLines(25)
+    if #lines == 0 then DWM:Print(L["MSG_LOG_EMPTY"]); return end
+    DWM:Print(L["MSG_LOG_HEADER"])
+    for _, line in ipairs(lines) do DWM:Print("  " .. line) end
+end
+
 --============================================================================
 -- Dynamic args: purposes editor + roster
 --============================================================================
@@ -338,6 +357,18 @@ local function BuildRosterArgs()
     return args
 end
 
+local function BuildLogArgs()
+    local lines = LogLines(50)
+    if #lines == 0 then
+        return { _empty = { type = "description", order = 1, name = L["MSG_LOG_EMPTY"] } }
+    end
+    local args = {}
+    for i, line in ipairs(lines) do
+        args["l" .. i] = { type = "description", order = i, name = line, fontSize = "small" }
+    end
+    return args
+end
+
 --============================================================================
 -- Static options tree (top-level keys -> short /dwm commands)
 --============================================================================
@@ -479,6 +510,27 @@ local options = {
             type = "execute", order = 27,
             name = L["OPT_ITEMS_LIST_NAME"], desc = L["OPT_ITEMS_LIST_DESC"],
             func = PrintItems,
+        },
+        sortafter = {
+            type = "toggle", order = 28,
+            name = L["OPT_SORTAFTER_NAME"], desc = L["OPT_SORTAFTER_DESC"],
+            get = function() return P().sortAfterItems end,
+            set = function(_, v) P().sortAfterItems = v end,
+        },
+        logtab = { type = "group", order = 29, name = L["OPT_LOG"], args = {} },
+        log = {
+            type = "execute", order = 34,
+            name = L["OPT_LOG_PRINT_NAME"], desc = L["OPT_LOG_PRINT_DESC"],
+            func = PrintLog,
+        },
+        logclear = {
+            type = "execute", order = 35,
+            name = L["OPT_LOG_CLEAR_NAME"], desc = L["OPT_LOG_CLEAR_DESC"],
+            confirm = true, confirmText = L["OPT_LOG_CLEAR_DESC"],
+            func = function()
+                if DWM.db.global then wipe(DWM.db.global.log) end
+                DWM:Print(L["MSG_LOG_CLEARED"]); ns.RefreshOptions()
+            end,
         },
         item = {
             type = "input", order = 110, guiHidden = true,
@@ -625,6 +677,7 @@ local options = {
 function ns.RefreshOptions()
     options.args.purposeedit.args = BuildPurposeEditArgs()
     options.args.rostertab.args   = BuildRosterArgs()
+    options.args.logtab.args      = BuildLogArgs()
     local reg = LibStub("AceConfigRegistry-3.0", true)
     if reg then reg:NotifyChange(ADDON_NAME) end
 end
@@ -636,6 +689,7 @@ function ns.SetupOptions()
 
     options.args.purposeedit.args = BuildPurposeEditArgs()
     options.args.rostertab.args   = BuildRosterArgs()
+    options.args.logtab.args      = BuildLogArgs()
 
     options.args.profiles = LibStub("AceDBOptions-3.0"):GetOptionsTable(DWM.db)
     options.args.profiles.order = 40
@@ -656,7 +710,7 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_PAUSE"]);    DWM:Print(L["CMD_HELP_BALANCE"])
             DWM:Print(L["CMD_HELP_ROSTER"]);   DWM:Print(L["CMD_HELP_STATUS"])
             DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
-            DWM:Print(L["CMD_HELP_ITEMLIST"])
+            DWM:Print(L["CMD_HELP_ITEMLIST"]); DWM:Print(L["CMD_HELP_LOG"])
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end

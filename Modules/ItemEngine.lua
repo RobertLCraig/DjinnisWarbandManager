@@ -272,6 +272,12 @@ function ItemEngine:_Finish(reason)
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
     ClearCursor()
+    -- Optional: consolidate the warband stacks our empty-slot splits fragment.
+    -- Single server-side call (DESIGN S3); only when we actually moved things.
+    if s.moves > 0 and DWM.db.profile.sortAfterItems
+        and C_Container and C_Container.SortBank then
+        pcall(C_Container.SortBank, BANKTYPE_ACCOUNT)
+    end
     if s.moves > 0 or s.verbose then
         DWM:Print(L["MSG_ITEM_DONE"]:format(s.moves))
     end
@@ -299,6 +305,7 @@ function ItemEngine:_DoOneMove(plan)
             if bag then
                 if count <= e.amount then
                     C_Container.UseContainerItem(bag, slot, nil, BANKTYPE_ACCOUNT, false)
+                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_DEPOSIT"], count, ItemName(e.itemID)))
                     return true
                 end
                 -- partial: split into an EMPTY warband slot (S13.4); never a
@@ -310,6 +317,7 @@ function ItemEngine:_DoOneMove(plan)
                     ClearCursor()
                     C_Container.SplitContainerItem(bag, slot, e.amount)
                     C_Container.PickupContainerItem(dBag, dSlot)
+                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_DEPOSIT"], e.amount, ItemName(e.itemID)))
                     return true
                 end
             end
@@ -323,6 +331,7 @@ function ItemEngine:_DoOneMove(plan)
                     -- moves it OUT to bags. (bankType is only for targeting the
                     -- warband on a *deposit* from a bag slot.)
                     C_Container.UseContainerItem(bag, slot)
+                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_WITHDRAW"], count, ItemName(e.itemID)))
                     return true
                 end
                 if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
@@ -332,6 +341,7 @@ function ItemEngine:_DoOneMove(plan)
                     ClearCursor()
                     C_Container.SplitContainerItem(bag, slot, e.amount)
                     C_Container.PickupContainerItem(dBag, dSlot)
+                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
                     return true
                 end
             end

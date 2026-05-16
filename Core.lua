@@ -39,6 +39,7 @@ local defaults = {
         itemEnabled = false,           -- items OFF by default (safety, DESIGN S8)
         itemFirstRunConfirmed = false, -- first real item run requires opt-in
         debug = false,                 -- verbose tracing for diagnosis
+        sortAfterItems = false,        -- run C_Container.SortBank after item moves
         defaultTargetGold = 1000,      -- LEGACY (Phase 1): read once for migration
         defaultPurpose = "Default",
         -- purposes is intentionally NOT in defaults: presets are seeded into
@@ -54,8 +55,11 @@ local defaults = {
     },
     global = {
         characters = {},               -- [GUID] = per-character record
+        log = {},                      -- transaction log (capped FIFO)
     },
 }
+
+local LOG_CAP = 200
 
 --============================================================================
 -- Session-only state
@@ -148,6 +152,19 @@ function DWM:Debug(msg)
     if self.db and self.db.profile and self.db.profile.debug then
         print("|cFF8888FF[DWM dbg]|r " .. tostring(msg))
     end
+end
+
+-- Append a transaction record (account-wide, capped FIFO). `text` is the
+-- already-formatted, localized human-readable detail.
+function DWM:LogTxn(text)
+    if not (self.db and self.db.global) then return end
+    local log = self.db.global.log
+    log[#log + 1] = {
+        t = time(),
+        char = (UnitName("player")) or "?",
+        text = tostring(text),
+    }
+    while #log > LOG_CAP do table.remove(log, 1) end
 end
 
 --============================================================================
