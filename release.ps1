@@ -49,7 +49,10 @@ if (-not (Test-Path $ReleaseNotesFile)) {
 }
 
 $rnContent    = Get-Content $ReleaseNotesFile -Raw -Encoding UTF8
-$versionMatch = [regex]::Match($rnContent, '##\s+Version:\s*(\S+)')
+# Strip HTML comment blocks first so a comment that mentions the version
+# pattern can't poison detection (it once parsed the version as a quote char).
+$rnForVersion = [regex]::Replace($rnContent, '(?s)<!--.*?-->', '')
+$versionMatch = [regex]::Match($rnForVersion, '##\s+Version:\s*(\S+)')
 if (-not $versionMatch.Success) {
     Write-Err "No '## Version: x.y.z' line found in RELEASE_NOTES.md."
 }
