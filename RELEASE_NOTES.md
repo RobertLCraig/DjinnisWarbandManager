@@ -14,6 +14,9 @@
 
 Phase 5 - account-wide item management (in progress).
 
+- **Fixed: a manually-chosen purpose (e.g. Banker/Auctioneer) reverted to a
+  profession-detected one after /reload.** Explicit purpose picks are now
+  correctly marked user-set and never auto-overridden.
 - **Fixed: automatic balancing never ran on opening the bank in normal play.**
   The trigger wrongly required the `AccountBanker` interaction; a normal
   banker fires `Banker`/`CharacterBanker`, so auto-balance only happened via

@@ -56,13 +56,22 @@ local MODE_VALUES = {
     depositall = L["OPT_ITEM_MODE_DEPOSITALL"],
 }
 
-local function CurRec() return ns.Roster and ns.Roster:Current() end
+-- NB: `a and b:c()` truncates to ONE value, so `local r,k = CurRec()` would
+-- get k=nil. Return Roster:Current() as the tail call so BOTH rec,key pass
+-- through (this is why purpose changes weren't marked user-set and got
+-- reverted by ProfessionDetect after a reload).
+local function CurRec()
+    if not ns.Roster then return nil end
+    return ns.Roster:Current()
+end
 
-local function SetPurposeFor(rec, key, name)
+local function SetPurposeFor(rec, _key, name)
     rec.purpose = name
-    if key == (ns.Roster and ns.Roster:CurrentKey()) then
-        rec.purposeUserSet = true   -- stop profession auto-suggestion (S13.6)
-    end
+    -- Any explicit pick (current char OR an alt via the roster) is sticky:
+    -- ProfessionDetect must never auto-revert a user choice (S13.6). The old
+    -- key==CurrentKey guard let reverts through for roster-set alts and (with
+    -- the CurRec truncation bug) even the current character.
+    rec.purposeUserSet = true
 end
 
 --============================================================================
