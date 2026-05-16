@@ -190,6 +190,8 @@ combat; character/realm rename; connected-realm alt.
    changelog.
 5. **Account-wide item management** (§14) — persistent ledger, item-centric overview tab,
    residual-shortfall feedback. No new bank APIs; reuses the §3 scan + convergent model.
+6. **Profession-conditioned items + bank-side config button** (§15) — item targets gated by the
+   character's actual professions/skill; standalone bag-addon-compatible bank button.
 
 ## 12. Borrow vs avoid (lessons)
 
@@ -377,6 +379,63 @@ bucket + snapshot triggers on bank-ready/login/bag-update + broker lines), `Loca
 (new strings, incl. profile-scope help text), `.toc` (add file + version bump), this doc + memory.
 Parse-check every edited Lua with luac 5.1 (§ reference-lua-toolchain), 0 errors required;
 in-game shakedown still gates release (item subsystem is the irreversible one).
+
+## 15. Phase 6 — Profession-conditioned items + bank-side config button
+
+Two user gaps: (a) a "Crafter" with no Enchanting should not stock Enchanting Vellum — item
+needs must follow the character's actual professions/skill, not a coarse purpose (chosen model:
+**profession-conditioned items**, not a purpose explosion — a purpose is one slot, can't express
+a dual-profession char); (b) a config entry point right at the bank that survives bag-replacement
+addons. Same constraints as §14: professions, like item counts, are only knowable on the logged-in
+character → snapshot per character; advisory cross-char, authoritative live.
+
+**15.1 Profession snapshot (extend ProfessionDetect + Roster).** `rec.professions =
+{ [skillLineID] = { name, rank, max } }`, captured at login in `ProfessionDetect:Apply` (it
+already calls `GetProfessions`/`GetProfessionInfo` for Crafter/Gatherer classification — extend
+to record every primary+secondary skill line with `rank`). Locale-independent key = base
+skill-line ID (reuse the existing `GATHERING`/`CRAFTING` maps; add full id→name for display,
+cached). Stale-tolerant: unknown until that character has logged in since the feature shipped.
+Kept even for `managed=false` (cheap character fact; only the item *counts* are privacy/size
+sensitive, not professions).
+
+**15.2 Item spec gains an optional profession gate.** `purpose.items[itemID]` /
+`char.itemOverrides[itemID]` = `{ qty, mode, prof = <skillLineID|nil>, minSkill = <n|nil> }`.
+`prof = nil` ⇒ applies to everyone in the purpose (today's behavior — fully backward compatible).
+
+**15.3 Resolution filter (`Purposes:ResolveItemsFor`).** For a prof-gated item: include only if
+`rec.professions[prof]` exists and (`minSkill` nil or `rank ≥ minSkill`). If `rec.professions`
+is **unknown** (alt not snapshotted yet): exclude from active targets (don't manage) but tag the
+entry `gatedUnknown` so the §14 ledger shows "profession unknown" instead of silently dropping
+it. On the logged-in character professions are freshly snapshotted, so live moves stay accurate
+where they actually happen. `AllManagedItemIDs()` unaffected (still the union for the row list).
+
+**15.4 Presets / migration.** Crafter preset's Vellum gains `prof = Enchanting`. Forward-safe
+seeding (`_seededPresets`) deliberately never rewrites an existing purpose, so current testers'
+`Crafter.items[38682]` keeps `prof = nil` — they set it via the new UI/command (or delete &
+re-add). Document; do not auto-clobber edited purposes.
+
+**15.5 UI / commands.** The §14.4 item-centric overview tab (the "better management UI" the user
+asked for) and the existing per-purpose inline editor each gain a **Requires profession** dropdown
+(values = known professions) + optional **min skill** input, reusing `Purposes:SetItem`. Command:
+`/dwm purposeitemprof <purpose> <link|id> <profession|none> [minSkill]`; `/dwm purposeitem`
+optionally accepts a trailing profession token. `/dwm ledger` lines show the gate
+(`needs Enchanting`) and `gatedUnknown`.
+
+**15.6 Bank-side config button (Feature 3).** New tiny standalone `Button` (lazily created;
+own file `Modules/BankButton.lua` or in Core). Shown when `bankState → ready`, hidden on
+`BANKFRAME_CLOSED` — driven by **our own §13.1 state**, NOT anchored to `BankFrame`,
+`AccountBankPanel`, or any 3rd-party frame, so it is inherently compatible with Baganator /
+Bagnon / ArkInventory / OneBag / default UI (the only robust approach — those addons
+hide/replace Blizzard's bank frame). Draggable; `db.profile.bankButton = { point, x, y, hide }`
+persists position; click → `AceConfigDialog:Open(ADDON_NAME)`. Plain (non-secure) frame so no
+combat-lockdown issues; high strata. Toggle to disable.
+
+**15.7 Files.** `ProfessionDetect.lua` (snapshot professions), `Roster.lua` (`professions`
+field), `Purposes.lua` (`prof`/`minSkill` filter in `ResolveItemsFor`, CRUD setter), `ItemLedger`
+/ `Options.lua` (gate display + `gatedUnknown`, prof dropdown, `/dwm purposeitemprof`, bank-button
+toggle), new `Modules/BankButton.lua`, `Core.lua` (show/hide hook in the §13.1 ready/closed
+transitions), `Locales/enUS.lua`, `.toc` (+ file, version bump), this doc + memory. Parse-check
+every edited Lua with luac 5.1; in-game shakedown gates release.
 
 ## Appendix — confirmed API contract (client 12.0.5, non-deprecated)
 
