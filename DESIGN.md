@@ -180,8 +180,8 @@ combat; character/realm rename; connected-realm alt.
 ## 11. Phasing
 
 1. **Foundation + gold** — TOC, Ace3 embeds, AceAddon/AceDB, warband-available gate
-   (`PLAYER_INTERACTION_MANAGER_FRAME_SHOW` + `AccountBanker`==68, **not** WarbandMiser's
-   `Banker or AccountBanker` always-true bug), gold balancer, AceConfig skeleton
+   (`BANKFRAME_OPENED` + `IsWarbandUsable()`; accept any banker interaction 8/67/68 — see the
+   §13.1 corrected note), gold balancer, AceConfig skeleton
    (`enable`/`mode`/`set`/`status`), minimap/broker. No item risk — safe to start here.
 2. **Purposes** — presets, resolution chain, `ProfessionDetect`, roster panel, `Mule`/`manage off`.
 3. **Item engine** — `UseContainerItem`-first mover + split fallback + event-driven sequencing;
@@ -204,11 +204,20 @@ bespoke config panel; every reference addon's fixed-delay cursor queue (replace 
 ## 13. Hardening (engineering review)
 
 **13.1 Bank-ready state machine.** `PLAYER_INTERACTION_MANAGER_FRAME_SHOW` fires before the bank is
-usable; `CanUseBank(Account)` may be false for a few frames; tab IDs can momentarily return empty.
-State = `closed → opening → ready`. Enter `ready` only when **all** hold: `arg1 == AccountBanker` (68),
-`C_Bank.CanUseBank(Account)` true, and `FetchPurchasedBankTabIDs(Account)` returns a non-empty stable
-table. Use `BANKFRAME_OPENED` as the UI-ready signal and `BANKFRAME_CLOSED` to force `closed` + abort
-any in-flight pass. No balancing runs outside `ready`.
+usable; `CanUseBank(Account)` may be false for a few frames. State = `closed → opening → ready`.
+Enter `ready` when **both** hold: `BANKFRAME_OPENED` has fired (the reliable "bank UI is up"
+signal — fires for any banker and survives bag-replacement addons) **and**
+`IsWarbandUsable()` (`C_Bank.CanUseBank(Account)` + ≥1 purchased tab). `BANKFRAME_CLOSED` forces
+`closed` + aborts any in-flight pass. No balancing runs outside `ready`.
+
+**Corrected (was a real shipped bug):** the gate must NOT require a specific interaction type.
+`Enum.PlayerInteractionType` `Banker`(8)/`CharacterBanker`(67)/`AccountBanker`(68) all open the
+same `BankFrame` (verified: `PlayerInteractionFrameManager`), and the warband bank is reachable
+from all three. An earlier over-correction of WarbandMiser's `arg == Banker or AccountBanker`
+precedence bug required `AccountBanker`(68) only — so a normal banker (fires 8/67) never reached
+`ready` and **auto-balance never ran in normal play** (only manual `/dwm balance`, which bypasses
+the state machine). Fix: treat the whole banker set as "a bank opened" and gate the *action* on
+`IsWarbandUsable()`; drive readiness off `BANKFRAME_OPENED`, not the interaction type.
 
 **13.2 On-character count wrapper.** All counts go through one function
 `DWM:GetOnCharacterCount(itemID)` = `C_Item.GetItemCount(id, false, false, false, false)`
@@ -371,7 +380,7 @@ in-game shakedown still gates release (item subsystem is the irreversible one).
 
 ## Appendix — confirmed API contract (client 12.0.5, non-deprecated)
 
-- Banker gate: `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, `arg1 == Enum.PlayerInteractionType.AccountBanker` (68).
+- Banker gate: readiness = `BANKFRAME_OPENED` + `IsWarbandUsable()`. `PLAYER_INTERACTION_MANAGER_FRAME_SHOW` `arg1` ∈ {`Banker` 8, `CharacterBanker` 67, `AccountBanker` 68} (all open `BankFrame`) is a supplementary trigger / HIDE-reset — never a required-type filter (§13.1 corrected).
 - Gold: `C_Bank.DepositMoney/WithdrawMoney/FetchDepositedMoney(Enum.BankType.Account)`;
   gate `C_Bank.CanUseBank/CanDepositMoney/CanWithdrawMoney`; `C_Bank.FetchBankLockedReason()`.
 - Item move (full): `C_Container.UseContainerItem(bag, slot, nil, Enum.BankType.Account, reagentBankOpen)`.

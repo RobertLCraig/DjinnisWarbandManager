@@ -22,8 +22,20 @@ ns.L = L
 --============================================================================
 
 local BANKTYPE_ACCOUNT = (Enum and Enum.BankType and Enum.BankType.Account) or 2
-local INTERACT_ACCOUNT_BANKER =
-    (Enum and Enum.PlayerInteractionType and Enum.PlayerInteractionType.AccountBanker) or 68
+
+-- Any of these banker interactions open the unified BankFrame; the warband
+-- bank is reachable from ALL of them (verified in wow-ui-source:
+-- PlayerInteractionFrameManager maps Banker/CharacterBanker/AccountBanker ->
+-- BankFrame). Requiring AccountBanker(68) only was a bug: a normal banker
+-- fires Banker(8)/CharacterBanker(67), so auto-balance never triggered in
+-- normal play. We accept the whole set and gate the ACTION on
+-- IsWarbandUsable() instead.
+local PIT = Enum and Enum.PlayerInteractionType
+local BANKER_TYPES = {
+    [(PIT and PIT.Banker) or 8]          = true,
+    [(PIT and PIT.CharacterBanker) or 67] = true,
+    [(PIT and PIT.AccountBanker) or 68]   = true,
+}
 
 ns.BANKTYPE_ACCOUNT = BANKTYPE_ACCOUNT
 
@@ -68,7 +80,7 @@ local LOG_CAP = 200
 ns.sessionPaused = false
 ns.bankState = "closed"               -- "closed" | "opening" | "ready"
 
-local sawAccountBanker = false
+local sawBanker = false
 local uiReady = false
 local ranThisOpen = false
 
@@ -173,20 +185,27 @@ end
 
 local function ResetBankState()
     ns.bankState = "closed"
-    sawAccountBanker = false
+    sawBanker = false
     uiReady = false
     ranThisOpen = false
 end
 
 function DWM:_TryTransitionReady()
     if ns.bankState == "ready" then return end
-    if not sawAccountBanker then return end
+    -- BANKFRAME_OPENED is the reliable "bank UI is up" signal (fires for any
+    -- banker type and even with bag-replacement addons). Readiness = UI open
+    -- AND the warband bank actually usable. We no longer require a specific
+    -- interaction type (that was the auto-balance-never-fired bug).
     if not uiReady then return end
-    if not self:IsWarbandUsable() then return end
+    if not self:IsWarbandUsable() then
+        self:Debug("bank: UI open but warband not usable yet")
+        return
+    end
 
     ns.bankState = "ready"
     if ranThisOpen then return end
     ranThisOpen = true
+    self:Debug("bank: ready -> running balance/items/ledger")
 
     if not self.db.profile.enabled then return end
     if ns.sessionPaused then
@@ -203,15 +222,16 @@ function DWM:_TryTransitionReady()
 end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)
-    if interactionType == INTERACT_ACCOUNT_BANKER then
-        sawAccountBanker = true
+    if BANKER_TYPES[interactionType] then
+        sawBanker = true
         if ns.bankState == "closed" then ns.bankState = "opening" end
+        self:Debug("bank: interaction show type=" .. tostring(interactionType))
         self:_TryTransitionReady()
     end
 end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_HIDE(_, interactionType)
-    if interactionType == INTERACT_ACCOUNT_BANKER then
+    if BANKER_TYPES[interactionType] then
         ResetBankState()
     end
 end

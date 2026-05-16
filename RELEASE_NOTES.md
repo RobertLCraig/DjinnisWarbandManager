@@ -14,6 +14,12 @@
 
 Phase 5 - account-wide item management (in progress).
 
+- **Fixed: automatic balancing never ran on opening the bank in normal play.**
+  The trigger wrongly required the `AccountBanker` interaction; a normal
+  banker fires `Banker`/`CharacterBanker`, so auto-balance only happened via
+  `/dwm balance`. It now keys off the bank window opening + warband being
+  usable, so it just works at any banker (and with bag addons).
+
 - New item ledger: persistent, advisory account snapshots of the warband bank
   and each managed character's on-hand counts (captured at the bank and on
   login; never gate a move).
