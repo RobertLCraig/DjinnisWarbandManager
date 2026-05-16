@@ -106,6 +106,59 @@ function Purposes:SetMule(name, on)
     return true
 end
 
+--============================================================================
+-- Item targets (Phase 3). spec = { qty = <n>, mode = "keepmin"|"exact"|"depositall" }
+--============================================================================
+
+local VALID_MODES = { keepmin = true, exact = true, depositall = true }
+
+function Purposes:SetItem(purposeName, itemID, qty, mode)
+    local e = DWM.db.profile.purposes[purposeName]
+    if not e then return false, "missing" end
+    itemID = tonumber(itemID)
+    if not itemID then return false, "baditem" end
+    mode = VALID_MODES[mode] and mode or "keepmin"
+    qty = math.max(0, math.floor(tonumber(qty) or 0))
+    e.items = e.items or {}
+    e.items[itemID] = { qty = qty, mode = mode }
+    return true
+end
+
+function Purposes:DelItem(purposeName, itemID)
+    local e = DWM.db.profile.purposes[purposeName]
+    if not e or not e.items then return false end
+    e.items[tonumber(itemID) or -1] = nil
+    return true
+end
+
+-- Merged item targets for the CURRENT character:
+-- purpose.items, then per-character itemOverrides win (false = unmanage that id).
+-- Returns { [itemID] = { qty, mode } }
+function Purposes:ResolveItemsForCurrent()
+    local prof = DWM.db.profile
+    local rec  = ns.Roster and ns.Roster:Current()
+    local out  = {}
+    if not rec then return out end
+
+    local pname = rec.purpose or prof.defaultPurpose
+    local p = prof.purposes[pname] or prof.purposes[prof.defaultPurpose]
+    if p and p.items then
+        for id, spec in pairs(p.items) do
+            out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin" }
+        end
+    end
+    if rec.itemOverrides then
+        for id, spec in pairs(rec.itemOverrides) do
+            if spec == false then
+                out[id] = nil                       -- explicitly unmanaged here
+            elseif type(spec) == "table" then
+                out[id] = { qty = spec.qty or 0, mode = spec.mode or "keepmin" }
+            end
+        end
+    end
+    return out
+end
+
 -- Resolve the current character's gold target.
 -- Returns: copperTarget, source, isMule, purposeName
 --   source in: "override" | "purpose" | "mule" | "default" | "none"

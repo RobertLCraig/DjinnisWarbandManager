@@ -8,22 +8,23 @@
 
 # Release Notes
 
-## Version: 0.2.0
+## Version: 0.3.0
 
-Phase 2 - character purposes, roster, and profession auto-detection.
+Phase 3 - item balancing.
 
-- Gold targets now come from a character **purpose** (Default, Raider, Mythic,
-  Crafter, Gatherer, Leveling, Mule) instead of a single shared number.
-  Purposes are fully editable and you can add your own.
-- **Mule** purpose: pulls all gold out of the warband bank onto that
-  character and never deposits.
-- Per-character **gold override** still wins over the purpose; resolution is
-  override -> purpose -> default purpose.
-- **Profession auto-detection**: new characters are suggested Crafter or
-  Gatherer from their professions (suggestion only - never overrides a purpose
-  you picked yourself; only primary professions count).
-- **Roster** panel/command to view and manage every character on the account,
-  including excluding bank alts entirely ("Manage this character" off).
-- Phase 1 per-character settings are migrated automatically.
-- Everything remains reachable from both the options panel and the `/dwm`
-  command tree.
+- Balances stackable reagents toward per-character targets, the same model as
+  gold: surplus deposits to the warband bank, shortfall withdraws.
+- Three per-item modes: **keep at least** (deposit surplus, never withdraw -
+  e.g. Crafters keep 500 Enchanting Vellum), **maintain exactly** (deposit and
+  withdraw), and **deposit all** (keep none).
+- Item targets live on a purpose (the Crafter preset already keeps Vellum) and
+  can be overridden per character.
+- **Safety first**: item balancing is OFF by default, and the first real run
+  is simulated until you explicitly confirm it. Simulate mode predicts space
+  problems before they happen.
+- Item moves use Blizzard's bank-context API with event-driven pacing (no
+  fragile fixed delays) and re-derive from live state, so an interrupted run
+  simply finishes next visit. Aborts cleanly on combat or closing the bank.
+- Configure from the panel (per-purpose item editor) or commands: paste an
+  item link or ID - `/dwm item <link|id> <qty> [keepmin|exact|depositall]`,
+  `/dwm items`, `/dwm itemenable on|off`.

@@ -35,7 +35,9 @@ local defaults = {
     profile = {
         enabled = true,
         mode = "both",                 -- "deposit" | "withdraw" | "both"
-        simulate = false,              -- dry-run: report, never move gold
+        simulate = false,              -- dry-run: report, never move anything
+        itemEnabled = false,           -- items OFF by default (safety, DESIGN S8)
+        itemFirstRunConfirmed = false, -- first real item run requires opt-in
         defaultTargetGold = 1000,      -- LEGACY (Phase 1): read once for migration
         defaultPurpose = "Default",
         -- purposes is intentionally NOT in defaults: presets are seeded into
@@ -98,6 +100,14 @@ function DWM:IsWarbandUsable()
     return true
 end
 
+-- On-character item count: bags + reagent BAG only; excludes the character
+-- bank AND the account/warband bank (DESIGN S13.2 - single patch point so
+-- the three banks can never leak into a balance decision).
+function DWM:GetOnCharacterCount(itemID)
+    if not itemID then return 0 end
+    return C_Item.GetItemCount(itemID, false, false, true, false) or 0
+end
+
 function DWM:GetWarbandGold()
     if C_Bank and C_Bank.FetchDepositedMoney then
         return C_Bank.FetchDepositedMoney(BANKTYPE_ACCOUNT) or 0
@@ -138,6 +148,9 @@ function DWM:_TryTransitionReady()
     end
     local Balancer = self:GetModule("Balancer", true)
     if Balancer then Balancer:RunGold("bank-open") end
+    -- Gold first, then items (DESIGN S13.9 deterministic order).
+    local ItemEngine = self:GetModule("ItemEngine", true)
+    if ItemEngine then ItemEngine:Run("bank-open") end
 end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)
@@ -161,6 +174,8 @@ function DWM:BANKFRAME_OPENED()
 end
 
 function DWM:BANKFRAME_CLOSED()
+    local ItemEngine = self:GetModule("ItemEngine", true)
+    if ItemEngine and ItemEngine.Abort then ItemEngine:Abort("bank-closed") end
     ResetBankState()
 end
 
@@ -168,6 +183,8 @@ function DWM:PLAYER_REGEN_DISABLED()
     -- Entering combat: abort any in-flight work and reset (DESIGN S13.14).
     local Balancer = self:GetModule("Balancer", true)
     if Balancer and Balancer.Abort then Balancer:Abort("combat") end
+    local ItemEngine = self:GetModule("ItemEngine", true)
+    if ItemEngine and ItemEngine.Abort then ItemEngine:Abort("combat") end
     ResetBankState()
 end
 

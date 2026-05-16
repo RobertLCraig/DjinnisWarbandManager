@@ -26,6 +26,36 @@ local function SplitNameValue(input)
     return input:match("^(.-)%s+(%S+)$")
 end
 
+-- Pull an itemID, qty and optional mode out of free text that may contain a
+-- pasted item link (whose [Name] can contain spaces).
+local ITEM_MODES = { keepmin = true, exact = true, depositall = true }
+local function ParseItemArgs(input)
+    input = tostring(input or "")
+    local id = input:match("Hitem:(%d+)") or input:match("|Hitem:(%d+)")
+    local rest = input
+    if id then
+        rest = input:gsub("|%x+|Hitem:.-|h%[.-%]|h|r", " "):gsub("|Hitem:.-|h.-|h", " ")
+    else
+        id = input:match("^%s*(%d+)")
+        if id then rest = input:gsub("^%s*%d+", " ", 1) end
+    end
+    local qty  = rest:match("(%d+)")
+    local mode = rest:match("(keepmin)") or rest:match("(exact)") or rest:match("(depositall)")
+    return tonumber(id), tonumber(qty), mode
+end
+
+local function ItemDisplayName(itemID)
+    local n = C_Item.GetItemInfo(itemID)
+    if not n and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+    return n or ("item:" .. tostring(itemID))
+end
+
+local MODE_VALUES = {
+    keepmin    = L["OPT_ITEM_MODE_KEEPMIN"],
+    exact      = L["OPT_ITEM_MODE_EXACT"],
+    depositall = L["OPT_ITEM_MODE_DEPOSITALL"],
+}
+
 local function CurRec() return ns.Roster and ns.Roster:Current() end
 
 local function SetPurposeFor(rec, key, name)
@@ -83,6 +113,21 @@ local function PrintRoster()
     end
 end
 
+local function PrintItems()
+    local t = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
+    local ids = {}
+    for id in pairs(t) do ids[#ids + 1] = id end
+    table.sort(ids)
+    if #ids == 0 then DWM:Print(L["MSG_ITEMS_LIST_EMPTY"]); return end
+    DWM:Print(L["MSG_ITEMS_LIST_HEADER"])
+    for _, id in ipairs(ids) do
+        local s = t[id]
+        DWM:Print(("  %s (%d): %d  |cFFAAAAAA[%s]|r  - have %d"):format(
+            ItemDisplayName(id), id, s.qty or 0, s.mode or "keepmin",
+            DWM:GetOnCharacterCount(id)))
+    end
+end
+
 --============================================================================
 -- Dynamic args: purposes editor + roster
 --============================================================================
@@ -134,6 +179,74 @@ local function BuildPurposeEditArgs()
                         if ok then DWM:Print(L["MSG_PURPOSE_DELETED"]:format(pname)); ns.RefreshOptions()
                         elseif why == "isdefault" then DWM:Print(L["MSG_PURPOSE_ISDEFAULT"]) end
                     end,
+                },
+                items = {
+                    type = "group", inline = true, order = 4, name = L["OPT_ITEMS"],
+                    args = (function()
+                        local ia = {
+                            add = {
+                                type = "input", order = 1,
+                                name = L["OPT_PURPOSE_ITEM_ADD_NAME"],
+                                desc = L["OPT_PURPOSE_ITEM_ADD_DESC"],
+                                usage = "<link|id> <qty> [keepmin|exact|depositall]",
+                                get = function() return "" end,
+                                set = function(_, v)
+                                    local id, qty, md = ParseItemArgs(v)
+                                    if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                                    ns.Purposes:SetItem(pname, id, qty or 0, md)
+                                    DWM:Print(L["MSG_PURPOSE_ITEM_SET"]:format(
+                                        pname, ItemDisplayName(id), qty or 0, md or "keepmin"))
+                                    ns.RefreshOptions()
+                                end,
+                            },
+                        }
+                        local entry = ns.Purposes:Get(pname)
+                        local items = entry and entry.items or {}
+                        local oid = 2
+                        local ids = {}
+                        for id in pairs(items) do ids[#ids + 1] = id end
+                        table.sort(ids)
+                        for _, id in ipairs(ids) do
+                            local itemID = id
+                            ia["i" .. oid] = {
+                                type = "group", inline = true, order = oid,
+                                name = ItemDisplayName(itemID) .. " (" .. itemID .. ")",
+                                args = {
+                                    qty = {
+                                        type = "input", order = 1, name = L["OPT_ITEM_QTY"],
+                                        usage = "<n>",
+                                        get = function() return tostring((items[itemID] or {}).qty or 0) end,
+                                        validate = function(_, v) return ParseGold(v) ~= nil or L["OPT_ITEM_QTY"] end,
+                                        set = function(_, v)
+                                            ns.Purposes:SetItem(pname, itemID, ParseGold(v) or 0,
+                                                (items[itemID] or {}).mode)
+                                        end,
+                                    },
+                                    mode = {
+                                        type = "select", order = 2, name = L["OPT_ITEM_MODE"],
+                                        values = MODE_VALUES,
+                                        sorting = { "keepmin", "exact", "depositall" },
+                                        get = function() return (items[itemID] or {}).mode or "keepmin" end,
+                                        set = function(_, v)
+                                            ns.Purposes:SetItem(pname, itemID,
+                                                (items[itemID] or {}).qty or 0, v)
+                                        end,
+                                    },
+                                    del = {
+                                        type = "execute", order = 3, name = L["OPT_ITEM_DEL"],
+                                        func = function()
+                                            ns.Purposes:DelItem(pname, itemID)
+                                            DWM:Print(L["MSG_PURPOSE_ITEM_DEL"]:format(
+                                                pname, ItemDisplayName(itemID)))
+                                            ns.RefreshOptions()
+                                        end,
+                                    },
+                                },
+                            }
+                            oid = oid + 1
+                        end
+                        return ia
+                    end)(),
                 },
             },
         }
@@ -282,10 +395,99 @@ local options = {
         purposeedit = { type = "group", order = 22, name = L["OPT_PURPOSES"], args = {} },
         rostertab   = { type = "group", order = 23, name = L["OPT_ROSTER"],   args = {} },
 
+        hdr_items = { type = "header", order = 24, name = L["OPT_ITEMS"] },
+        itemenable = {
+            type = "toggle", order = 25,
+            name = L["OPT_ITEMENABLED_NAME"], desc = L["OPT_ITEMENABLED_DESC"],
+            get = function() return P().itemEnabled end,
+            set = function(_, v)
+                P().itemEnabled = v
+                DWM:Print(L["MSG_ITEM_TOGGLED"]:format(v and L["ON"] or L["OFF"]))
+            end,
+        },
+        itemsconfirm = {
+            type = "execute", order = 26,
+            name = L["OPT_ITEMCONFIRM_NAME"], desc = L["OPT_ITEMCONFIRM_DESC"],
+            confirm = true, confirmText = L["OPT_ITEMCONFIRM_DESC"],
+            disabled = function() return P().itemFirstRunConfirmed end,
+            func = function()
+                P().itemFirstRunConfirmed = true
+                DWM:Print(L["MSG_ITEMS_CONFIRMED"])
+            end,
+        },
+        items = {
+            type = "execute", order = 27,
+            name = L["OPT_ITEMS_LIST_NAME"], desc = L["OPT_ITEMS_LIST_DESC"],
+            func = PrintItems,
+        },
+        item = {
+            type = "input", order = 110, guiHidden = true,
+            name = L["CMD_HELP_ITEM"], usage = "<link|id> <qty> [keepmin|exact|depositall]",
+            get = function() return "" end,
+            set = function(_, v)
+                local id, qty, md = ParseItemArgs(v)
+                if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                local r = CurRec(); if not r then return end
+                r.itemOverrides = r.itemOverrides or {}
+                r.itemOverrides[id] = { qty = qty or 0, mode = ITEM_MODES[md] and md or "keepmin" }
+                DWM:Print(L["MSG_ITEM_SET"]:format(
+                    ItemDisplayName(id), qty or 0, (ITEM_MODES[md] and md or "keepmin")))
+            end,
+        },
+        itemclear = {
+            type = "input", order = 111, guiHidden = true,
+            name = "itemclear", usage = "<link|id>",
+            get = function() return "" end,
+            set = function(_, v)
+                local id = (ParseItemArgs(v))
+                if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                local r = CurRec(); if not r or not r.itemOverrides then return end
+                r.itemOverrides[id] = nil
+                DWM:Print(L["MSG_ITEM_CLEARED"]:format(ItemDisplayName(id)))
+            end,
+        },
+        purposeitem = {
+            type = "input", order = 112, guiHidden = true,
+            name = "purposeitem", usage = "<purpose> <link|id> <qty> [mode]",
+            get = function() return "" end,
+            set = function(_, v)
+                local pn, rest = tostring(v):match("^(%S+)%s+(.+)$")
+                if not pn then return end
+                local id, qty, md = ParseItemArgs(rest)
+                if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                local ok = ns.Purposes:SetItem(pn, id, qty or 0, md)
+                if ok then
+                    DWM:Print(L["MSG_PURPOSE_ITEM_SET"]:format(
+                        pn, ItemDisplayName(id), qty or 0, md or "keepmin"))
+                    ns.RefreshOptions()
+                else
+                    DWM:Print(L["MSG_PURPOSE_MISSING"]:format(pn))
+                end
+            end,
+        },
+        purposeitemdel = {
+            type = "input", order = 113, guiHidden = true,
+            name = "purposeitemdel", usage = "<purpose> <link|id>",
+            get = function() return "" end,
+            set = function(_, v)
+                local pn, rest = tostring(v):match("^(%S+)%s+(.+)$")
+                if not pn then return end
+                local id = (ParseItemArgs(rest))
+                if not id then DWM:Print(L["MSG_ITEM_BADID"]); return end
+                if ns.Purposes:DelItem(pn, id) then
+                    DWM:Print(L["MSG_PURPOSE_ITEM_DEL"]:format(pn, ItemDisplayName(id)))
+                    ns.RefreshOptions()
+                end
+            end,
+        },
+
         hdr_actions = { type = "header", order = 30, name = L["OPT_GENERAL"] },
         balance = {
             type = "execute", order = 31, name = L["OPT_BALANCE_NOW_NAME"], desc = L["OPT_BALANCE_NOW_DESC"],
-            func = function() local B = DWM:GetModule("Balancer", true); if B then B:RunGold("manual") end end,
+            func = function()
+                local B = DWM:GetModule("Balancer", true); if B then B:RunGold("manual") end
+                local I = DWM:GetModule("ItemEngine", true); if I then I:Run("manual") end
+            end,
         },
         status = {
             type = "execute", order = 32, name = L["OPT_STATUS_NAME"], desc = L["OPT_STATUS_DESC"],
@@ -384,6 +586,8 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_ENABLE"]);   DWM:Print(L["CMD_HELP_SIMULATE"])
             DWM:Print(L["CMD_HELP_PAUSE"]);    DWM:Print(L["CMD_HELP_BALANCE"])
             DWM:Print(L["CMD_HELP_ROSTER"]);   DWM:Print(L["CMD_HELP_STATUS"])
+            DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
+            DWM:Print(L["CMD_HELP_ITEMLIST"])
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end
