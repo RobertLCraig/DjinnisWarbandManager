@@ -180,6 +180,9 @@ function ItemEngine:BuildPlan()
     for id in pairs(targets) do ids[#ids + 1] = id end
     table.sort(ids)   -- deterministic order (S13.9)
 
+    DWM:Debug(("BuildPlan: %d target(s), mode=%s canDep=%s canWd=%s")
+        :format(#ids, tostring(mode), tostring(canDep), tostring(canWd)))
+
     local plan, warns = {}, {}
     local wbFreeApprox  = FreeSlots(WarbandTabs())
     local bagFreeApprox = FreeSlots(PlayerBags())
@@ -247,6 +250,8 @@ end
 function ItemEngine:_Finish(reason)
     if not self.session then return end
     local s = self.session
+    DWM:Debug(("_Finish reason=%s moves=%d iters=%d"):format(
+        tostring(reason), s.moves or 0, s.iters or 0))
     self.session = nil
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
@@ -273,14 +278,17 @@ function ItemEngine:_DoOneMove(plan)
     for _, e in ipairs(plan) do
         if e.dir == "deposit" then
             local bag, slot, count = FindPlayerStack(e.itemID)
+            DWM:Debug(("_DoOneMove deposit item:%d amount=%d -> playerStack bag=%s slot=%s count=%s")
+                :format(e.itemID, e.amount, tostring(bag), tostring(slot), tostring(count)))
             if bag then
                 if count <= e.amount then
                     C_Container.UseContainerItem(bag, slot, nil, BANKTYPE_ACCOUNT, false)
                     return true
                 end
                 -- partial: need a warband destination + empty cursor (S13.4)
-                if CursorBusy() then return false end
+                if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
                 local dBag, dSlot = FindDestSlot(WarbandTabs(), e.itemID)
+                DWM:Debug("_DoOneMove deposit dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
                 if dBag then
                     ClearCursor()
                     C_Container.SplitContainerItem(bag, slot, e.amount)
@@ -290,6 +298,8 @@ function ItemEngine:_DoOneMove(plan)
             end
         else -- withdraw
             local bag, slot, count = FindWarbandStack(e.itemID)
+            DWM:Debug(("_DoOneMove withdraw item:%d amount=%d -> wbStack bag=%s slot=%s count=%s")
+                :format(e.itemID, e.amount, tostring(bag), tostring(slot), tostring(count)))
             if bag then
                 if count <= e.amount then
                     -- 2-arg form: the slot is already IN a warband tab, so this
@@ -309,6 +319,7 @@ function ItemEngine:_DoOneMove(plan)
             end
         end
     end
+    DWM:Debug("_DoOneMove: nothing actionable (no stack found / no dest space)")
     return false   -- nothing actionable (blocked: no space / locked / missing)
 end
 
@@ -389,13 +400,22 @@ end
 
 -- reason: "bank-open" (quiet when nothing to do) | "manual" (verbose)
 function ItemEngine:Run(reason)
-    if self.session then return end                       -- one pass at a time
+    if self.session then
+        DWM:Debug("ItemEngine:Run skipped - a session is already in progress")
+        return
+    end
 
     local manual   = (reason == "manual")
     local simulate = DWM.db.profile.simulate and true or false
     local verbose  = manual or simulate
 
+    DWM:Debug(("ItemEngine:Run reason=%s manual=%s sim=%s itemEnabled=%s confirmed=%s")
+        :format(tostring(reason), tostring(manual), tostring(simulate),
+                tostring(DWM.db.profile.itemEnabled),
+                tostring(DWM.db.profile.itemFirstRunConfirmed)))
+
     if not DWM.db.profile.itemEnabled then
+        DWM:Debug("Run: bail - itemEnabled is false")
         if verbose then DWM:Print(L["MSG_ITEMS_DISABLED"]) end
         return
     end
@@ -404,16 +424,23 @@ function ItemEngine:Run(reason)
         if ns.sessionPaused then return end
     end
     if not DWM:IsWarbandUsable() then
+        DWM:Debug("Run: bail - IsWarbandUsable() false")
         if verbose then DWM:Print(L["MSG_NO_WARBAND"]) end
         return
     end
     local rec = ns.Roster and ns.Roster:Current()
     if rec and rec.managed == false then
+        DWM:Debug("Run: bail - character not managed")
         if verbose then DWM:Print(L["MSG_UNMANAGED_SKIP"]) end
         return
     end
 
     local plan, warns = self:BuildPlan()
+    DWM:Debug("Run: BuildPlan -> " .. #plan .. " entr" .. (#plan == 1 and "y" or "ies"))
+    for _, e in ipairs(plan) do
+        DWM:Debug(("  plan: %s %d x item:%d (have %d, wb %d, qty %d, mode %s)")
+            :format(e.dir, e.amount, e.itemID, e.have, e.wb, e.qty, e.mode))
+    end
 
     -- First real run must be explicitly confirmed (DESIGN S8).
     local forcedSim = false
@@ -438,8 +465,12 @@ function ItemEngine:Run(reason)
         return
     end
 
-    if #plan == 0 then return end
+    if #plan == 0 then
+        DWM:Debug("Run: bail - empty plan (nothing to balance)")
+        return
+    end
 
+    DWM:Debug("Run: starting session")
     self.session = {
         iters = 0, moves = 0, verbose = verbose,
         awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,

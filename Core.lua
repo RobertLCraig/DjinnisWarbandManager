@@ -38,6 +38,7 @@ local defaults = {
         simulate = false,              -- dry-run: report, never move anything
         itemEnabled = false,           -- items OFF by default (safety, DESIGN S8)
         itemFirstRunConfirmed = false, -- first real item run requires opt-in
+        debug = false,                 -- verbose tracing for diagnosis
         defaultTargetGold = 1000,      -- LEGACY (Phase 1): read once for migration
         defaultPurpose = "Default",
         -- purposes is intentionally NOT in defaults: presets are seeded into
@@ -140,6 +141,13 @@ end
 -- Override AceConsole's Print with a tidy colored prefix.
 function DWM:Print(msg)
     print("|cFF4FC3F7" .. L["ADDON_NAME"] .. ":|r " .. tostring(msg))
+end
+
+-- Trace output, only when /dwm debug is on.
+function DWM:Debug(msg)
+    if self.db and self.db.profile and self.db.profile.debug then
+        print("|cFF8888FF[DWM dbg]|r " .. tostring(msg))
+    end
 end
 
 --============================================================================

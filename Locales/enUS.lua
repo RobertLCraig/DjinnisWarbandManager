@@ -137,6 +137,8 @@ L["CMD_HELP_ROSTER"] = "/dwm roster - list tracked characters"
 -- ===== Phase 3: item balancing =====
 L["ITEM_DEPOSIT"] = "Deposit"
 L["ITEM_WITHDRAW"] = "Withdraw"
+L["OPT_DEBUG_NAME"] = "Debug tracing"
+L["OPT_DEBUG_DESC"] = "Print detailed diagnostic trace for the balancing engine to chat."
 L["STATUS_ITEMS"] = "Item balancing: %s"
 L["STATUS_ITEMS_CONFIRMED"] = "Item first run confirmed: %s"
 L["STATUS_ITEM_TARGETS"] = "Item targets for this character: %d"

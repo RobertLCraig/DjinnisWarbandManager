@@ -372,6 +372,16 @@ local options = {
             end,
         },
 
+        debug = {
+            type = "toggle", order = 5,
+            name = L["OPT_DEBUG_NAME"], desc = L["OPT_DEBUG_DESC"],
+            get = function() return P().debug end,
+            set = function(_, v)
+                P().debug = v
+                DWM:Print("Debug tracing: " .. (v and L["ON"] or L["OFF"]))
+            end,
+        },
+
         hdr_char = {
             type = "header", order = 10,
             name = function()
@@ -535,8 +545,17 @@ local options = {
         balance = {
             type = "execute", order = 31, name = L["OPT_BALANCE_NOW_NAME"], desc = L["OPT_BALANCE_NOW_DESC"],
             func = function()
-                local B = DWM:GetModule("Balancer", true); if B then B:RunGold("manual") end
-                local I = DWM:GetModule("ItemEngine", true); if I then I:Run("manual") end
+                local B = DWM:GetModule("Balancer", true)
+                DWM:Debug("balance: Balancer module = " .. tostring(B ~= nil))
+                if B then B:RunGold("manual") end
+                local I = DWM:GetModule("ItemEngine", true)
+                DWM:Debug("balance: ItemEngine module = " .. tostring(I ~= nil))
+                if I then
+                    local ok, err = pcall(function() I:Run("manual") end)
+                    if not ok then DWM:Print("|cFFFF5555ItemEngine error:|r " .. tostring(err)) end
+                else
+                    DWM:Print("|cFFFF5555ItemEngine module not found|r")
+                end
             end,
         },
         status = {
