@@ -292,17 +292,22 @@ actual pass.
 like `global.characters`, **not** in AceDB `defaults`):
 
 - `db.global.warband = { items = { [itemID] = count }, scannedAt = <time>, scannedBy = <display> }`
-  — full warband-tab scan captured when the §13.1 state reaches `ready`, and re-captured on the
-  coalesced `BAG_UPDATE_DELAYED` / `PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED` bucket while open.
-  Generalize ItemEngine's `WarbandCount` into `ScanWarband()` returning the whole table (one scan,
-  shared).
+  — full warband-tab scan captured when the §13.1 state reaches `ready`, and re-captured while
+  open on a coalesced `BAG_UPDATE_DELAYED` / `PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED` bucket.
+  **ItemLedger registers its OWN `RegisterBucketEvent`** — it must NOT piggyback ItemEngine's
+  bucket, which is session-scoped (created in `Run`, unregistered in `_Finish`/`_Abort`) and so
+  does not exist between passes. Generalize ItemEngine's `WarbandCount` into a shared
+  `ScanWarband()` returning the whole `{[itemID]=count}` table (one scan, reused by both).
 - `db.global.characters[GUID].itemCounts = { [itemID] = count }`, `.itemCountsAt = <time>` —
   on-hand counts via `DWM:GetOnCharacterCount` (§13.2), but **only for items managed for that
   character** (its resolved target set ∪ overrides), so SV stays O(managed items), not
   Altoholic-style full-bag. Captured after `Roster:EnsureCurrent` on `PLAYER_LOGIN` /
   `PLAYER_ENTERING_WORLD` and on a coalesced `BAG_UPDATE_DELAYED` bucket. **Skipped entirely for
   `managed=false`** characters. Pruned to currently-managed IDs on every snapshot so config
-  changes shrink it.
+  changes shrink it. **Lifecycle:** snapshot-time pruning can't clean a character that stops
+  snapshotting — so when a character is flipped to `managed=false` (the `manage` setter, and
+  `Roster:Delete`), wipe its `itemCounts`/`itemCountsAt` immediately rather than leaving stale
+  data that never self-prunes.
 - All snapshots timestamped and **stale-tolerant**: displayed as "as of <relative time> · <char>",
   never gate a move. Missing/empty snapshots (fresh install, alt never logged in) render as
   "—/unknown", never error.
@@ -321,6 +326,14 @@ shared by the tab, status block, broker, and simulate. Per managed itemID:
 - aggregate: `warband` (ledger); `demand` = Σ exact-mode deficits (`qty−have` where `have<qty`);
   `supply` = `warband` + Σ surplus deposits (depositall `have`; keepmin/exact `have−qty`);
   `shortBy` = `max(0, demand − supply)`.
+
+**Profile-scope seam (known semantic, not a bug).** Purposes and their `items` live in
+`db.profile` (per AceDB profile); the roster lives in `db.global`. `BuildReport` resolves every
+character's intent through the **active profile's** purpose definitions, even for characters last
+seen under a different profile. This is correct for the single-profile norm; with multiple
+profiles the report reflects "what the current profile's rules say about each character." State
+this in the tab header/help so it is expected, not surprising. (Pre-existing characteristic of
+the §4 model; §14 only makes it visible.)
 
 **14.4 Item-centric overview tab (Options).** New top-level dynamic group `itemsoverview`
 (rebuilt by `ns.RefreshOptions()` alongside purposes/roster). Per item: a collapsible inline
@@ -341,12 +354,18 @@ the §13.8 promise for the warband-empty/partial case.
 lines (§14.5). (b) **Panel status block** — a dynamic `description` "Unmet demand" under the live
 summary listing every `shortBy>0` item from `BuildReport()`. (c) **Broker tooltip** — in
 `OnTooltipShow`, after the gold lines, "Items short: N" + up to ~3 worst offenders.
+(d) **`/dwm ledger` chat command** — prints `BuildReport()` (per-item warband count, per-char
+have→intent, `shortBy`). This is the primary testable entry point during the build (the build
+order's earlier "/dwm print" phrasing predates the current command surface — there is no
+`print` command; use `ledger`). Registered like `/dwm log` (top-level execute, AceConfig node).
 
 **14.7 Files.** New `Modules/ItemLedger.lua` (.toc: after `Purposes.lua`, before `Balancer.lua`;
 addon code, not a lib → not in embeds.xml). Edits: `Purposes.lua` (`ResolveItemsFor` /
-`AllManagedItemIDs`), `ItemEngine.lua` (`shortfall`), `Options.lua` (overview tab + status block
-+ refresh wiring), `Core.lua` (snapshot triggers on bank-ready/login/bag-update + broker lines),
-`Locales/enUS.lua` (new strings), `.toc` (add file + version bump), this doc + memory.
+`AllManagedItemIDs`), `ItemEngine.lua` (`shortfall`, shared `ScanWarband`), `Options.lua`
+(overview tab + status block + `/dwm ledger` execute + refresh wiring + **`manage` setter wipes
+`itemCounts`**), `Roster.lua` (**`Delete` wipes `itemCounts`**), `Core.lua` (ItemLedger's own
+bucket + snapshot triggers on bank-ready/login/bag-update + broker lines), `Locales/enUS.lua`
+(new strings, incl. profile-scope help text), `.toc` (add file + version bump), this doc + memory.
 Parse-check every edited Lua with luac 5.1 (§ reference-lua-toolchain), 0 errors required;
 in-game shakedown still gates release (item subsystem is the irreversible one).
 
