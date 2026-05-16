@@ -8,9 +8,15 @@
 
 # Release Notes
 
-## Version: 0.3.0
+## Version: 0.3.1
 
 Phase 3 - item balancing.
+
+- New **Banker/Auctioneer** purpose preset (large working gold float for
+  auction-house play; keeps a bounded target rather than draining the warband
+  bank like Mule).
+- Preset seeding is now forward-safe: new presets reach existing profiles,
+  while presets you delete stay deleted.
 
 - Balances stackable reagents toward per-character targets, the same model as
   gold: surplus deposits to the warband bank, shortfall withdraws.

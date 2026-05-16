@@ -25,14 +25,22 @@ local PRESETS = {
     { name = "Gatherer", gold = 10000 },
     { name = "Leveling", gold = 2000 },
     { name = "Mule",     gold = 0, mule = true },
+    -- Banker/Auctioneer: a large working float for AH buyouts/posting. Not a
+    -- Mule (it keeps a bounded target, it doesn't drain the warband bank).
+    { name = "Banker/Auctioneer", gold = 250000 },
 }
 
--- Seed presets once, and migrate the Phase 1 profile.defaultTargetGold.
+-- Seed presets and migrate the Phase 1 profile.defaultTargetGold.
+-- Per-preset tracking (_seededPresets) is forward-safe: a NEW preset added in
+-- a later version reaches existing profiles, but a preset the user deletes is
+-- NOT resurrected (the AceDB-defaults gotcha we set out to avoid).
 function Purposes:Seed()
     local p = DWM.db.profile
     p.purposes = p.purposes or {}
-    if not p._seeded then
-        for _, preset in ipairs(PRESETS) do
+    p._seededPresets = p._seededPresets or {}
+
+    for _, preset in ipairs(PRESETS) do
+        if not p._seededPresets[preset.name] then
             if p.purposes[preset.name] == nil then
                 local entry = { gold = preset.gold }
                 if preset.mule then entry.mule = true end
@@ -44,14 +52,19 @@ function Purposes:Seed()
                 end
                 p.purposes[preset.name] = entry
             end
+            p._seededPresets[preset.name] = true
         end
-        -- Phase 1 -> Phase 2: carry the old global default into "Default".
+    end
+
+    -- One-time Phase 1 -> Phase 2: carry the old global default into "Default".
+    if not p._seeded then
         if type(p.defaultTargetGold) == "number" and p.purposes.Default then
             p.purposes.Default.gold = p.defaultTargetGold
         end
-        p.defaultPurpose = p.defaultPurpose or "Default"
         p._seeded = true
     end
+
+    p.defaultPurpose = p.defaultPurpose or "Default"
     if not p.purposes[p.defaultPurpose] then
         -- Default purpose was deleted; fall back to any existing one.
         p.defaultPurpose = next(p.purposes) or "Default"

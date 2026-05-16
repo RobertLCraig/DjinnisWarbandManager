@@ -2,7 +2,7 @@
 ## Title: Djinni's Warband Manager
 ## Notes: Balance gold (and later items) toward per-character targets driven by character purpose.
 ## Author: Djinni
-## Version: 0.3.0
+## Version: 0.3.1
 ## IconTexture: Interface\Icons\achievement_guildperk_mobilebanking
 ## SavedVariables: DjinnisWarbandManagerDB
 ## DefaultState: enabled
