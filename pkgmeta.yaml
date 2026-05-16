@@ -1,0 +1,22 @@
+package-as: DjinnisWarbandManager
+enable-nolib-creation: no
+
+ignore:
+  - .git
+  - .gitignore
+  - .github
+  - .claude
+  - CLAUDE.md
+  - CHANGELOG.md
+  - README.md
+  - LICENSE
+  - deploy.ps1
+  - release.ps1
+  - RELEASE_NOTES.md
+  - pkgmeta.yaml
+  - DESIGN.md
+  - releases
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
