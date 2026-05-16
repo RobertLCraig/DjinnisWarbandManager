@@ -21,7 +21,10 @@ local PRESETS = {
     { name = "Default",  gold = 1000 },
     { name = "Raider",   gold = 50000 },
     { name = "Mythic",   gold = 30000 },
-    { name = "Crafter",  gold = 20000, items = { [38682] = { qty = 500, mode = "keepmin" } } },
+    -- Vellum uses "exact": a Crafter should be topped back up to 500 from the
+    -- warband when low (the original "always have at least 500" requirement),
+    -- not merely have surplus skimmed. keepmin never withdraws by design.
+    { name = "Crafter",  gold = 20000, items = { [38682] = { qty = 500, mode = "exact" } } },
     { name = "Gatherer", gold = 10000 },
     { name = "Leveling", gold = 2000 },
     { name = "Mule",     gold = 0, mule = true },

@@ -19,6 +19,12 @@ Phase 3 - item balancing.
   while presets you delete stay deleted.
 - Fixed money display showing "???" instead of coin icons (and unreadable
   when copied): amounts now print as comma-grouped, colored g/s/c text.
+- Fixed on-character item count wrongly including the character reagent
+  *bank*, which could make "keep at least" over-deposit carried stacks.
+- Crafter's Enchanting Vellum preset now uses **exact** mode (maintains 500:
+  tops up from the warband when low, skims the surplus when high) - matching
+  "always have at least 500 on the Crafter". keepmin never withdraws by
+  design, so it would not top a character back up.
 - The options panel now shows a live summary at the top - current character,
   its purpose, and the resolved gold target - and names the character in the
   "This Character" section, so the active purpose is obvious at a glance.

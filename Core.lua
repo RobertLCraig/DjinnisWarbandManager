@@ -118,12 +118,16 @@ function DWM:IsWarbandUsable()
     return true
 end
 
--- On-character item count: bags + reagent BAG only; excludes the character
--- bank AND the account/warband bank (DESIGN S13.2 - single patch point so
--- the three banks can never leak into a balance decision).
+-- On-character item count: carried bags ONLY. Excludes the character bank,
+-- the character REAGENT BANK, and the account/warband bank (DESIGN S13.2 -
+-- single patch point so the three banks can never leak into a balance
+-- decision). NOTE: the carried reagent *bag* (BagIndex 5) is always part of
+-- the base GetItemCount; the 4th arg is the reagent *bank* (character-bank
+-- territory) and MUST be false, or keepmin over-deposits.
+-- GetItemCount(itemID, includeBank, includeUses, includeReagentBank, includeAccountBank)
 function DWM:GetOnCharacterCount(itemID)
     if not itemID then return 0 end
-    return C_Item.GetItemCount(itemID, false, false, true, false) or 0
+    return C_Item.GetItemCount(itemID, false, false, false, false) or 0
 end
 
 function DWM:GetWarbandGold()

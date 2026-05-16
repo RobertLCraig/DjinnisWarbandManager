@@ -38,10 +38,13 @@ Two traps this creates:
 
 - **`C_Item.GetItemCount` signature.** Current:
   `GetItemCount(itemID, includeBank, includeUses, includeReagentBank, includeAccountBank)`.
-  "On character" = bags + reagent **bag** only → `GetItemCount(id, false, false, true, false)` —
-  explicitly excluding character bank **and** account bank. Letting either bank's contents leak into the
-  "on character" number corrupts every balance decision. This is the single most likely place the
-  three-banks confusion produces a silent bug.
+  "On character" = carried bags only → `GetItemCount(id, false, false, false, false)`. The carried
+  reagent **bag** (BagIndex 5) is ALWAYS in the base count; the 4th arg is `includeReagentBank` =
+  the character **reagent bank** (character-bank territory) and MUST be `false`. Passing `true` here
+  was a real bug: it inflated `have`, so keepmin over-deposited carried stacks to the warband.
+  Excluding character bank, reagent bank, **and** account bank is mandatory — letting any bank's
+  contents leak into the "on character" number corrupts every balance decision. This is the single
+  most likely place the three-banks confusion produces a silent bug.
 - **The warband bank must be purchased.** The first tab costs gold. Until then
   `C_Bank.CanUseBank(Enum.BankType.Account)` is false and `FetchPurchasedBankTabIDs(Account)` is empty.
   Must no-op with a clear message — never error. Same graceful handling for: no free warband slots,
@@ -115,15 +118,17 @@ so character/realm renames and connected realms don't orphan a character's purpo
 
 `qty`-only is insufficient. Each item target has a **mode**:
 
-- **keepmin** (default; the Vellum case) — deposit surplus above `qty`; **never withdraw**. Safe on
-  characters that shouldn't accumulate the item.
-- **exact** — deposit *and* withdraw to hit exactly `qty` (true balance).
+- **keepmin** — deposit surplus above `qty`; **never withdraw**. Safe on characters that shouldn't
+  accumulate the item, but it will NOT top a character back up.
+- **exact** (the Vellum/Crafter case) — deposit *and* withdraw to hit exactly `qty` (true balance).
+  This is what "always have at least 500 Vellum on the Crafter" actually requires: top up from the
+  warband when low, skim the surplus when high.
 - **depositall** (`qty = 0`) — deposit everything; never withdraw. Eligible for the server-side bulk
   call.
 
 ## 6. Purposes & profession detection
 
-Presets ship sensible defaults (Crafter includes Enchanting Vellum `keepmin 500`, etc.). `Mule` purpose
+Presets ship sensible defaults (Crafter includes Enchanting Vellum `exact 500`, etc.). `Mule` purpose
 = withdraw-all gold/items toward this character (WarbandMiser's "AllGold" pattern). On login, if
 `char.autoPurpose`, suggest a purpose from professions (gathering→Gatherer, crafting→Crafter, none→leave
 manual) — suggestion only, never silently overrides a user choice. `managed=false` excludes a character
@@ -183,6 +188,8 @@ combat; character/realm rename; connected-realm alt.
    eligibility filter; per-item modes; Crafter/Vellum preset; `simulate`-first; first-run confirm.
 4. **Polish** — transaction log, full locale pass, item-link drag input, profile import/export,
    changelog.
+5. **Account-wide item management** (§14) — persistent ledger, item-centric overview tab,
+   residual-shortfall feedback. No new bank APIs; reuses the §3 scan + convergent model.
 
 ## 12. Borrow vs avoid (lessons)
 
@@ -204,9 +211,10 @@ table. Use `BANKFRAME_OPENED` as the UI-ready signal and `BANKFRAME_CLOSED` to f
 any in-flight pass. No balancing runs outside `ready`.
 
 **13.2 On-character count wrapper.** All counts go through one function
-`DWM:GetOnCharacterCount(itemID)` = `C_Item.GetItemCount(id, false, false, true, false)`
-(bags + reagent bag; excludes character bank **and** account bank). Single patch point if Blizzard
-re-introduces reagent-bank flags. Document that reagent-*bank* contents are never included.
+`DWM:GetOnCharacterCount(itemID)` = `C_Item.GetItemCount(id, false, false, false, false)`
+(carried bags incl. the reagent *bag*, which is always in the base count; excludes character bank,
+the character reagent *bank*, **and** account bank). Single patch point. The 4th arg
+(`includeReagentBank`) must stay `false` - it is character-bank territory, not the carried bag.
 
 **13.3 Lock-event handling (corrected).** `ITEM_LOCK_CHANGED` payload is `(bagOrSlotIndex, slotIndex)`
 — **no locked boolean in the event**. On fire, re-query
@@ -271,6 +279,77 @@ history of depositing unintended items (some tools, cosmetic stackables, quest i
 call, rescan the warband, diff against expectation, and surface (optionally auto-withdraw) anything
 unexpected.
 
+## 14. Phase 5 — Account-wide item management
+
+Addresses two user gaps: (a) no at-a-glance view of which characters/purposes source vs sink
+which items; (b) shortages ("enchanter needs 500 Vellum, warband has 0") are invisible unless
+you are standing at the bank on the needy character, and even there a *partial* shortfall is
+never quantified. Builds entirely on existing mechanics — no new bank APIs, same convergent
+model (§13.11): snapshots are advisory; the live scan at the bank stays authoritative for the
+actual pass.
+
+**14.1 ItemLedger module (new).** Persistent account snapshots in `db.global` (created lazily
+like `global.characters`, **not** in AceDB `defaults`):
+
+- `db.global.warband = { items = { [itemID] = count }, scannedAt = <time>, scannedBy = <display> }`
+  — full warband-tab scan captured when the §13.1 state reaches `ready`, and re-captured on the
+  coalesced `BAG_UPDATE_DELAYED` / `PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED` bucket while open.
+  Generalize ItemEngine's `WarbandCount` into `ScanWarband()` returning the whole table (one scan,
+  shared).
+- `db.global.characters[GUID].itemCounts = { [itemID] = count }`, `.itemCountsAt = <time>` —
+  on-hand counts via `DWM:GetOnCharacterCount` (§13.2), but **only for items managed for that
+  character** (its resolved target set ∪ overrides), so SV stays O(managed items), not
+  Altoholic-style full-bag. Captured after `Roster:EnsureCurrent` on `PLAYER_LOGIN` /
+  `PLAYER_ENTERING_WORLD` and on a coalesced `BAG_UPDATE_DELAYED` bucket. **Skipped entirely for
+  `managed=false`** characters. Pruned to currently-managed IDs on every snapshot so config
+  changes shrink it.
+- All snapshots timestamped and **stale-tolerant**: displayed as "as of <relative time> · <char>",
+  never gate a move. Missing/empty snapshots (fresh install, alt never logged in) render as
+  "—/unknown", never error.
+
+**14.2 Generalized resolution (Purposes).** `ResolveItemsForCurrent()` becomes a thin wrapper over
+new `ResolveItemsFor(rec)` so the report resolves targets for **any** roster record. Add
+`AllManagedItemIDs()` = union of every purpose's `items` + every char's `itemOverrides` — drives
+the overview row list and the per-char snapshot filter.
+
+**14.3 Account report.** `ItemLedger:BuildReport()` — pure, deterministic (itemID asc, §13.9),
+shared by the tab, status block, broker, and simulate. Per managed itemID:
+
+- per-character: resolved `{qty,mode}`, snapshot `have`, derived intent (deposit surplus /
+  withdraw deficit / keep) — the **same math as `ItemEngine:BuildPlan`**, evaluated from snapshots
+  for every managed char, not just current.
+- aggregate: `warband` (ledger); `demand` = Σ exact-mode deficits (`qty−have` where `have<qty`);
+  `supply` = `warband` + Σ surplus deposits (depositall `have`; keepmin/exact `have−qty`);
+  `shortBy` = `max(0, demand − supply)`.
+
+**14.4 Item-centric overview tab (Options).** New top-level dynamic group `itemsoverview`
+(rebuilt by `ns.RefreshOptions()` alongside purposes/roster). Per item: a collapsible inline
+group headed by name + warband count + `OK` / `▲ SHORT n`; children = each purpose targeting it
+(inline qty input + mode select + del, reusing `Purposes:SetItem`/`DelItem`) and each managed
+character's resolved `have → intent` line; plus an "add item to purpose" input (reuse
+`ParseItemArgs`, link/id). The existing per-purpose inline item editor **stays** (natural place to
+bulk-edit one purpose); this tab is the cross-cutting view.
+
+**14.5 Residual-shortfall feedback (ItemEngine).** `BuildPlan` already clamps exact-withdraw to
+`min(qty−have, wb)`; capture the clamped remainder as `e.shortfall`. Surface the **number** (not
+just the boolean `MSG_ITEM_NONE_IN_WB`) in simulate output ("withdraw 50 Vellum — still 150
+short, warband holds 0") and in the post-pass summary / `blocked` finish for live runs. Delivers
+the §13.8 promise for the warband-empty/partial case.
+
+**14.6 Alert surfaces (user-selected; login summary explicitly de-scoped).**
+(a) **Chat at bank** — residual shortfalls appended to the existing ItemEngine summary/simulate
+lines (§14.5). (b) **Panel status block** — a dynamic `description` "Unmet demand" under the live
+summary listing every `shortBy>0` item from `BuildReport()`. (c) **Broker tooltip** — in
+`OnTooltipShow`, after the gold lines, "Items short: N" + up to ~3 worst offenders.
+
+**14.7 Files.** New `Modules/ItemLedger.lua` (.toc: after `Purposes.lua`, before `Balancer.lua`;
+addon code, not a lib → not in embeds.xml). Edits: `Purposes.lua` (`ResolveItemsFor` /
+`AllManagedItemIDs`), `ItemEngine.lua` (`shortfall`), `Options.lua` (overview tab + status block
++ refresh wiring), `Core.lua` (snapshot triggers on bank-ready/login/bag-update + broker lines),
+`Locales/enUS.lua` (new strings), `.toc` (add file + version bump), this doc + memory.
+Parse-check every edited Lua with luac 5.1 (§ reference-lua-toolchain), 0 errors required;
+in-game shakedown still gates release (item subsystem is the irreversible one).
+
 ## Appendix — confirmed API contract (client 12.0.5, non-deprecated)
 
 - Banker gate: `PLAYER_INTERACTION_MANAGER_FRAME_SHOW`, `arg1 == Enum.PlayerInteractionType.AccountBanker` (68).
@@ -281,7 +360,7 @@ unexpected.
 - Bulk (depositall only): `C_Bank.AutoDepositItemsIntoBank(Enum.BankType.Account)`.
 - Filter: `C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, ItemLocation)`.
 - Tabs: `C_Bank.FetchPurchasedBankTabData/IDs(Enum.BankType.Account)`; bag IDs `AccountBankTab_1..5` (12–16).
-- On-char count: `C_Item.GetItemCount(id, false, false, true, false)`; scan bags `0..NUM_BAG_SLOTS` + `ReagentBag` (5).
+- On-char count: `C_Item.GetItemCount(id, false, false, false, false)` (carried bags incl. ReagentBag 5; NOT the reagent bank); scan bags `0..NUM_BAG_SLOTS` + `ReagentBag` (5).
 - Move-confirm / sequencing events: `ITEM_LOCK_CHANGED` (re-query `GetContainerItemInfo(bag,slot).isLocked` — no locked flag in payload), `PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED`, `BAG_UPDATE`, `BAG_UPDATE_DELAYED` (coalesce via AceBucket).
 - Abort triggers: `PLAYER_REGEN_DISABLED`, `BANKFRAME_CLOSED`.
 - Lifecycle: `BANKFRAME_OPENED` (UI-ready signal for the 13.1 state machine).
