@@ -71,10 +71,28 @@ local ranThisOpen = false
 -- Helpers
 --============================================================================
 
+-- Texture-free money formatter. GetMoneyString embeds |T coin icons that
+-- render as "???" in some chat contexts and do not survive copy/paste, so we
+-- emit comma-grouped, colored g/s/c text instead (always readable & copyable).
+local function CommaGroup(n)
+    local s = tostring(n)
+    s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (s:gsub("^,", ""))
+end
+
 function DWM:FormatMoney(copper)
-    -- GetMoneyString is a current retail global; avoids hand-rolled formatting.
-    if GetMoneyString then return GetMoneyString(copper or 0, true) end
-    return tostring(math.floor((copper or 0) / 10000)) .. "g"
+    copper = math.floor(tonumber(copper) or 0)
+    local neg = copper < 0
+    if neg then copper = -copper end
+    local g = math.floor(copper / 10000)
+    local s = math.floor((copper % 10000) / 100)
+    local c = copper % 100
+
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = "|cffffd700" .. CommaGroup(g) .. "g|r" end
+    if g > 0 or s > 0 then parts[#parts + 1] = "|cffc7c7cf" .. s .. "s|r" end
+    parts[#parts + 1] = "|cffeda55f" .. c .. "c|r"
+    return (neg and "-" or "") .. table.concat(parts, " ")
 end
 
 -- Effective target in COPPER for the current character.

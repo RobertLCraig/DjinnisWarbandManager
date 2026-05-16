@@ -17,6 +17,8 @@ Phase 3 - item balancing.
   bank like Mule).
 - Preset seeding is now forward-safe: new presets reach existing profiles,
   while presets you delete stay deleted.
+- Fixed money display showing "???" instead of coin icons (and unreadable
+  when copied): amounts now print as comma-grouped, colored g/s/c text.
 - The options panel now shows a live summary at the top - current character,
   its purpose, and the resolved gold target - and names the character in the
   "This Character" section, so the active purpose is obvious at a glance.
