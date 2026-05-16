@@ -21,6 +21,9 @@ Phase 3 - item balancing.
   when copied): amounts now print as comma-grouped, colored g/s/c text.
 - Fixed on-character item count wrongly including the character reagent
   *bank*, which could make "keep at least" over-deposit carried stacks.
+- Fixed item engine double-moving (e.g. withdrawing 1000 when 500 was the
+  target): each move now waits for live counts to actually change before the
+  next, since warband transfers are server-confirmed and asynchronous.
 - Crafter's Enchanting Vellum preset now uses **exact** mode (maintains 500:
   tops up from the warband when low, skims the surplus when high) - matching
   "always have at least 500 on the Crafter". keepmin never withdraws by

@@ -33,6 +33,7 @@ local REAGENT_BAG = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or 5
 
 local ITER_CAP = 100        -- hard ceiling on physical moves per pass
 local WATCHDOG = 2.0        -- failsafe only; real pacing is event-driven
+local MAX_WAIT = 8          -- settle ticks with no count change -> give up
 
 --============================================================================
 -- Inventory helpers
@@ -222,11 +223,19 @@ function ItemEngine:BuildPlan()
     return plan, warns
 end
 
--- Signature of live state for no-progress detection (S13.11 safety).
-local function PlanSig(plan)
+-- Signature of LIVE counts (on-character + warband) for every managed item.
+-- A move is only "settled" once this changes - the on-character count from
+-- C_Item.GetItemCount lags the actual transfer because warband moves are
+-- server-confirmed and async (DESIGN S13.3). Issuing the next move before
+-- this changes is exactly what caused a double-withdraw.
+local function CountSig()
+    local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
+    local ids = {}
+    for id in pairs(targets) do ids[#ids + 1] = id end
+    table.sort(ids)
     local parts = {}
-    for _, e in ipairs(plan) do
-        parts[#parts + 1] = e.itemID .. ":" .. e.dir .. ":" .. e.amount
+    for _, id in ipairs(ids) do
+        parts[#parts + 1] = id .. "=" .. DWM:GetOnCharacterCount(id) .. "/" .. WarbandCount(id)
     end
     return table.concat(parts, "|")
 end
@@ -308,44 +317,52 @@ function ItemEngine:_Step()
     if not s then return end
     if not DWM:IsWarbandUsable() then return self:Abort("warband-gone") end
 
+    -- SETTLE GATE: never issue the next move until the previous one is
+    -- actually reflected in live counts. Warband transfers are server-
+    -- confirmed and async, so GetItemCount lags; recomputing too early made
+    -- the plan repeat and double-moved (DESIGN S13.3/S13.11).
+    if s.awaiting then
+        if CountSig() == s.preSig then
+            s.waitTicks = (s.waitTicks or 0) + 1
+            if s.waitTicks > MAX_WAIT then
+                if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
+                return self:_Finish("stuck")
+            end
+            return self:_Arm()           -- still in transit; keep waiting
+        end
+        s.awaiting = false               -- prior move confirmed
+        s.waitTicks = 0
+    end
+
     s.iters = s.iters + 1
     if s.iters > ITER_CAP then return self:_Finish("cap") end
 
     local plan = self:BuildPlan()
     if #plan == 0 then return self:_Finish("done") end
 
-    -- No-progress guard: identical actionable state two steps running.
-    local sig = PlanSig(plan)
-    if sig == s.lastSig then
-        s.stall = (s.stall or 0) + 1
-        if s.stall >= 2 then
-            if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
-            return self:_Finish("blocked")
-        end
-    else
-        s.stall = 0
-    end
-    s.lastSig = sig
-
     if CursorBusy() then
-        -- Another addon (or us) holds the cursor; wait and retry briefly, then
-        -- give up rather than fight over it (S13.4).
+        -- Another addon (or us) holds the cursor; wait briefly, then give up
+        -- rather than fight over it (S13.4).
         s.cursorWaits = (s.cursorWaits or 0) + 1
         if s.cursorWaits > 3 then
             if s.verbose then DWM:Print(L["MSG_ITEM_ABORTED"]) end
             return self:_Finish("cursor")
         end
-        self:_Arm()
-        return
+        return self:_Arm()
     end
     s.cursorWaits = 0
 
+    -- Snapshot live counts BEFORE issuing so the settle gate can detect the
+    -- effect of exactly this move.
+    s.preSig = CountSig()
     local issued = self:_DoOneMove(plan)
     if not issued then
         if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
         return self:_Finish("blocked")
     end
     s.moves = s.moves + 1
+    s.awaiting = true
+    s.waitTicks = 0
     self:_Arm()
 end
 
@@ -423,7 +440,10 @@ function ItemEngine:Run(reason)
 
     if #plan == 0 then return end
 
-    self.session = { iters = 0, moves = 0, verbose = verbose, lastSig = nil, stall = 0 }
+    self.session = {
+        iters = 0, moves = 0, verbose = verbose,
+        awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,
+    }
     if not self._bucket then
         self._bucket = self:RegisterBucketEvent(
             { "BAG_UPDATE_DELAYED", "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED" },
