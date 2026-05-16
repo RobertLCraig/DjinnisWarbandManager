@@ -2,7 +2,7 @@
 ## Title: Djinni's Warband Manager
 ## Notes: Balance gold (and later items) toward per-character targets driven by character purpose.
 ## Author: Djinni
-## Version: 0.1.0
+## Version: 0.2.0
 ## IconTexture: Interface\Icons\achievement_guildperk_mobilebanking
 ## SavedVariables: DjinnisWarbandManagerDB
 ## DefaultState: enabled
@@ -17,7 +17,10 @@ Locales\enUS.lua
 # Core (defines the AceAddon object first)
 Core.lua
 
-# Modules
+# Modules (Roster + Purposes before Balancer/Options - they resolve targets)
+Modules\Roster.lua
+Modules\Purposes.lua
+Modules\ProfessionDetect.lua
 Modules\Balancer.lua
 
 # Options (AceConfig table -> panel + slash commands)

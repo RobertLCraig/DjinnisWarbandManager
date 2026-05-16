@@ -1,0 +1,132 @@
+--[[
+    Djinni's Warband Manager - Purposes (Phase 2)
+
+    Character "purpose" drives the gold (later item) target instead of rigid
+    level brackets. Presets are SEEDED into the live profile (not AceDB
+    defaults) so users can delete them without AceDB resurrecting them.
+
+    Resolution (DESIGN.md S4): explicit per-character override -> character's
+    purpose -> profile default purpose. Identical chain will extend to items.
+]]
+
+local ADDON_NAME, ns = ...
+local DWM = ns.Addon
+
+local Purposes = DWM:NewModule("Purposes")
+ns.Purposes = Purposes
+
+-- Preset purposes. gold is in gold units. items reserved for Phase 3.
+-- 38682 = Enchanting Vellum (keep >=500 on Crafters) - inert until Phase 3.
+local PRESETS = {
+    { name = "Default",  gold = 1000 },
+    { name = "Raider",   gold = 50000 },
+    { name = "Mythic",   gold = 30000 },
+    { name = "Crafter",  gold = 20000, items = { [38682] = { qty = 500, mode = "keepmin" } } },
+    { name = "Gatherer", gold = 10000 },
+    { name = "Leveling", gold = 2000 },
+    { name = "Mule",     gold = 0, mule = true },
+}
+
+-- Seed presets once, and migrate the Phase 1 profile.defaultTargetGold.
+function Purposes:Seed()
+    local p = DWM.db.profile
+    p.purposes = p.purposes or {}
+    if not p._seeded then
+        for _, preset in ipairs(PRESETS) do
+            if p.purposes[preset.name] == nil then
+                local entry = { gold = preset.gold }
+                if preset.mule then entry.mule = true end
+                if preset.items then
+                    entry.items = {}
+                    for id, spec in pairs(preset.items) do
+                        entry.items[id] = { qty = spec.qty, mode = spec.mode }
+                    end
+                end
+                p.purposes[preset.name] = entry
+            end
+        end
+        -- Phase 1 -> Phase 2: carry the old global default into "Default".
+        if type(p.defaultTargetGold) == "number" and p.purposes.Default then
+            p.purposes.Default.gold = p.defaultTargetGold
+        end
+        p.defaultPurpose = p.defaultPurpose or "Default"
+        p._seeded = true
+    end
+    if not p.purposes[p.defaultPurpose] then
+        -- Default purpose was deleted; fall back to any existing one.
+        p.defaultPurpose = next(p.purposes) or "Default"
+        p.purposes[p.defaultPurpose] = p.purposes[p.defaultPurpose] or { gold = 0 }
+    end
+end
+
+function Purposes:Names()
+    local p = DWM.db.profile.purposes or {}
+    local names = {}
+    for name in pairs(p) do names[#names + 1] = name end
+    table.sort(names, function(a, b) return a:lower() < b:lower() end)
+    return names
+end
+
+function Purposes:Get(name) return DWM.db.profile.purposes[name] end
+
+function Purposes:Add(name)
+    name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then return false, "empty" end
+    if DWM.db.profile.purposes[name] then return false, "exists" end
+    DWM.db.profile.purposes[name] = { gold = 0 }
+    return true
+end
+
+function Purposes:Delete(name)
+    local p = DWM.db.profile
+    if not p.purposes[name] then return false, "missing" end
+    if name == p.defaultPurpose then return false, "isdefault" end
+    p.purposes[name] = nil
+    -- Reassign any characters that pointed at the deleted purpose.
+    local g = DWM.db.global
+    if g and g.characters then
+        for _, rec in pairs(g.characters) do
+            if rec.purpose == name then rec.purpose = p.defaultPurpose end
+        end
+    end
+    return true
+end
+
+function Purposes:SetGold(name, gold)
+    local e = DWM.db.profile.purposes[name]
+    if not e then return false end
+    e.gold = math.max(0, math.floor(tonumber(gold) or 0))
+    return true
+end
+
+function Purposes:SetMule(name, on)
+    local e = DWM.db.profile.purposes[name]
+    if not e then return false end
+    e.mule = on and true or nil
+    return true
+end
+
+-- Resolve the current character's gold target.
+-- Returns: copperTarget, source, isMule, purposeName
+--   source in: "override" | "purpose" | "mule" | "default" | "none"
+function Purposes:ResolveGoldForCurrent()
+    local prof = DWM.db.profile
+    local rec  = ns.Roster and ns.Roster:Current()
+
+    if rec and type(rec.goldOverride) == "number" then
+        return math.max(0, math.floor(rec.goldOverride)) * 10000, "override", false
+    end
+
+    local pname = (rec and rec.purpose) or prof.defaultPurpose or "Default"
+    local entry = prof.purposes[pname]
+    local usedDefault = false
+    if not entry then
+        pname = prof.defaultPurpose or "Default"
+        entry = prof.purposes[pname]
+        usedDefault = true
+    end
+    if not entry then return 0, "none", false, pname end
+    if entry.mule then return 0, "mule", true, pname end
+    return math.max(0, math.floor(entry.gold or 0)) * 10000,
+           usedDefault and "default" or "purpose", false, pname
+end

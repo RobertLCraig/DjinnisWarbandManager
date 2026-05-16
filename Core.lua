@@ -36,12 +36,21 @@ local defaults = {
         enabled = true,
         mode = "both",                 -- "deposit" | "withdraw" | "both"
         simulate = false,              -- dry-run: report, never move gold
-        defaultTargetGold = 1000,      -- gold units (not copper)
+        defaultTargetGold = 1000,      -- LEGACY (Phase 1): read once for migration
+        defaultPurpose = "Default",
+        -- purposes is intentionally NOT in defaults: presets are seeded into
+        -- the live profile by Purposes:Seed() so users can delete them without
+        -- AceDB resurrecting them. _seeded guards the one-time seed/migration.
         minimap = { hide = false },
     },
+    -- Phase 1 per-character fields kept ONLY for one-time migration into the
+    -- global roster (Roster:EnsureCurrent). New config lives in db.global.
     char = {
-        useDefault = true,             -- follow profile default unless overridden
-        targetGold = 1000,             -- gold units; used when useDefault == false
+        useDefault = true,
+        targetGold = 1000,
+    },
+    global = {
+        characters = {},               -- [GUID] = per-character record
     },
 }
 
@@ -66,14 +75,14 @@ function DWM:FormatMoney(copper)
     return tostring(math.floor((copper or 0) / 10000)) .. "g"
 end
 
--- Effective target in COPPER for the current character, plus a source tag.
+-- Effective target in COPPER for the current character.
+-- Returns: copper, source, isMule, purposeName  (delegates to Purposes).
 function DWM:GetEffectiveTargetCopper()
-    local c = self.db.char
-    if c and not c.useDefault and type(c.targetGold) == "number" then
-        return math.max(0, math.floor(c.targetGold)) * 10000, "override"
+    if ns.Purposes and ns.Purposes.ResolveGoldForCurrent then
+        return ns.Purposes:ResolveGoldForCurrent()
     end
     local g = (self.db.profile and self.db.profile.defaultTargetGold) or 0
-    return math.max(0, math.floor(g)) * 10000, "default"
+    return math.max(0, math.floor(g)) * 10000, "default", false
 end
 
 -- Is the warband bank actually usable right now (Phase 1: for gold)?
@@ -185,10 +194,19 @@ local function BuildBroker()
         end,
         OnTooltipShow = function(tt)
             tt:AddLine(L["BROKER_TOOLTIP_TITLE"])
-            local target = DWM:GetEffectiveTargetCopper()
+            local target, _, isMule, pname = DWM:GetEffectiveTargetCopper()
+            local rec = ns.Roster and ns.Roster:Current()
             tt:AddDoubleLine(L["STATUS_CHAR_GOLD"]:format(""), DWM:FormatMoney(GetMoney()))
             tt:AddDoubleLine(L["STATUS_WARBAND_GOLD"]:format(""), DWM:FormatMoney(DWM:GetWarbandGold()))
-            tt:AddDoubleLine(L["STATUS_TARGET"]:format(""), DWM:FormatMoney(target))
+            tt:AddDoubleLine(L["STATUS_PURPOSE"]:format(""), tostring(pname or "?"))
+            if isMule then
+                tt:AddDoubleLine(L["STATUS_TARGET"]:format(""), L["MULE_LABEL"])
+            else
+                tt:AddDoubleLine(L["STATUS_TARGET"]:format(""), DWM:FormatMoney(target))
+            end
+            if rec and rec.managed == false then
+                tt:AddLine("|cFFFF8080" .. L["STATUS_UNMANAGED"] .. "|r")
+            end
             tt:AddLine(" ")
             tt:AddLine("|cFFAAAAAA" .. L["BROKER_LEFT_CLICK"] .. "|r")
             tt:AddLine("|cFFAAAAAA" .. L["BROKER_RIGHT_CLICK"] .. "|r")
@@ -209,6 +227,11 @@ function DWM:OnInitialize()
     self.db = LibStub("AceDB-3.0"):New("DjinnisWarbandManagerDB", defaults, true)
     ns.db = self.db
 
+    -- Seed purposes + register this character BEFORE options so the panel and
+    -- command tree can list purposes and read the current record.
+    if ns.Purposes then ns.Purposes:Seed() end
+    if ns.Roster then ns.Roster:EnsureCurrent() end
+
     -- Options.lua registers the AceConfig table + slash commands at file load.
     if ns.SetupOptions then ns.SetupOptions() end
 
@@ -221,13 +244,31 @@ function DWM:OnEnable()
     self:RegisterEvent("BANKFRAME_OPENED")
     self:RegisterEvent("BANKFRAME_CLOSED")
     self:RegisterEvent("PLAYER_REGEN_DISABLED")
+    self:RegisterEvent("PLAYER_LOGIN")
+    self:RegisterEvent("PLAYER_ENTERING_WORLD")
     ResetBankState()
 end
 
--- Re-applied when AceDB profile changes (wired in Options.lua).
+-- Professions/realm are reliably available by these; refresh the record and
+-- run the (guarded) purpose suggestion.
+function DWM:PLAYER_LOGIN()
+    if ns.Purposes then ns.Purposes:Seed() end
+    if ns.Roster then ns.Roster:EnsureCurrent() end
+    if ns.ProfessionDetect then ns.ProfessionDetect:Apply() end
+    if ns.RefreshOptions then ns.RefreshOptions() end
+end
+
+function DWM:PLAYER_ENTERING_WORLD()
+    if ns.Roster then ns.Roster:EnsureCurrent() end
+end
+
+-- Re-applied when AceDB profile changes (wired in Options.lua). A new profile
+-- may have unseeded purposes, so reseed and rebuild the dynamic options.
 function DWM:RefreshConfig()
+    if ns.Purposes then ns.Purposes:Seed() end
     local icon = LibStub("LibDBIcon-1.0", true)
     if icon then
         if self.db.profile.minimap.hide then icon:Hide(ADDON_NAME) else icon:Show(ADDON_NAME) end
     end
+    if ns.RefreshOptions then ns.RefreshOptions() end
 end

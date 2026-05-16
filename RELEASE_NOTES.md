@@ -8,14 +8,22 @@
 
 # Release Notes
 
-## Version: 0.1.0
+## Version: 0.2.0
 
-Phase 1 - gold balancing foundation.
+Phase 2 - character purposes, roster, and profession auto-detection.
 
-- Automatically balances character gold toward a per-character target when you
-  visit the Warband banker (deposit excess / withdraw shortfall / maintain).
-- Deposit-only, withdraw-only, or both (maintain) modes.
-- Per-character override or shared profile default.
-- Simulate (dry-run) mode reports what would happen without moving any gold.
-- Session pause, minimap/broker button, and full control from the options
-  panel or the `/dwm` command tree.
+- Gold targets now come from a character **purpose** (Default, Raider, Mythic,
+  Crafter, Gatherer, Leveling, Mule) instead of a single shared number.
+  Purposes are fully editable and you can add your own.
+- **Mule** purpose: pulls all gold out of the warband bank onto that
+  character and never deposits.
+- Per-character **gold override** still wins over the purpose; resolution is
+  override -> purpose -> default purpose.
+- **Profession auto-detection**: new characters are suggested Crafter or
+  Gatherer from their professions (suggestion only - never overrides a purpose
+  you picked yourself; only primary professions count).
+- **Roster** panel/command to view and manage every character on the account,
+  including excluding bank alts entirely ("Manage this character" off).
+- Phase 1 per-character settings are migrated automatically.
+- Everything remains reachable from both the options panel and the `/dwm`
+  command tree.

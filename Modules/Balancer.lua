@@ -46,6 +46,13 @@ function Balancer:RunGold(reason)
         return
     end
 
+    -- Excluded characters are never touched (DESIGN: managed=false).
+    local rec = ns.Roster and ns.Roster:Current()
+    if rec and rec.managed == false then
+        if verbose then DWM:Print(L["MSG_UNMANAGED_SKIP"]) end
+        return
+    end
+
     inProgress = true
     local ok, err = pcall(self._DoGold, self, manual, simulate, verbose)
     inProgress = false
@@ -69,7 +76,32 @@ function Balancer:_DoGold(manual, simulate, verbose)
     local mode = DWM.db.profile.mode or "both"
     local charGold = GetMoney() or 0
     local warbandGold = DWM:GetWarbandGold()
-    local target = DWM:GetEffectiveTargetCopper()
+    local target, _, isMule = DWM:GetEffectiveTargetCopper()
+
+    -- MULE: pull everything from the warband to this character; never deposit.
+    if isMule then
+        if mode == "deposit" then
+            if verbose then DWM:Print(L["MSG_MULE_DEPOSIT_NOOP"]) end
+            return
+        end
+        local needed = warbandGold
+        if needed <= 0 then
+            if verbose then DWM:Print(L["MSG_NOTHING"]) end
+            return
+        end
+        if simulate then
+            DWM:Print(L["MSG_SIM_WITHDRAW"]:format(DWM:FormatMoney(needed)))
+            return
+        end
+        if C_Bank.CanWithdrawMoney and not C_Bank.CanWithdrawMoney(BANKTYPE_ACCOUNT) then
+            if verbose then DWM:Print(L["MSG_WITHDRAW_FAILED"]) end
+            return
+        end
+        local ok = pcall(C_Bank.WithdrawMoney, BANKTYPE_ACCOUNT, needed)
+        DWM:Print(ok and L["MSG_WITHDREW"]:format(DWM:FormatMoney(needed))
+                     or L["MSG_WITHDRAW_FAILED"])
+        return
+    end
 
     -- DEPOSIT: more on character than the target.
     if charGold > target and (mode == "deposit" or mode == "both") then
