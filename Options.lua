@@ -890,6 +890,21 @@ local options = {
 -- Registration
 --============================================================================
 
+-- Persist the standalone /dwm window size & position. AceConfigDialog's frame
+-- widget writes width/height/top/left into the status table it's given
+-- (f:SetStatusTable), so pointing that table at db.profile makes resizes
+-- survive reload. Tall default is seeded only when nothing is saved yet (and
+-- re-pointed on profile switch, since db.profile becomes a different table).
+function ns.WireDialogStatus()
+    local ACD = LibStub("AceConfigDialog-3.0")
+    ACD:GetStatusTable(ADDON_NAME)                 -- ensure ACD.Status[app]
+    P().uiStatus = P().uiStatus or {}
+    ACD.Status[ADDON_NAME].status = P().uiStatus
+    if not P().uiStatus.width then
+        ACD:SetDefaultSize(ADDON_NAME, 820, 680)   -- writes into P().uiStatus
+    end
+end
+
 function ns.RefreshOptions()
     options.args.purposeedit.args = BuildPurposeEditArgs()
     options.args.rostertab.args   = BuildRosterArgs()
@@ -914,6 +929,7 @@ function ns.SetupOptions()
 
     AceConfig:RegisterOptionsTable(ADDON_NAME, options)
     AceConfigDialog:AddToBlizOptions(ADDON_NAME, L["ADDON_NAME"])
+    ns.WireDialogStatus()
 
     DWM:RegisterChatCommand("dwm", function(input)
         input = input and input:trim() or ""

@@ -367,5 +367,6 @@ function DWM:RefreshConfig()
     if icon then
         if self.db.profile.minimap.hide then icon:Hide(ADDON_NAME) else icon:Show(ADDON_NAME) end
     end
+    if ns.WireDialogStatus then ns.WireDialogStatus() end  -- new profile = new table
     if ns.RefreshOptions then ns.RefreshOptions() end
 end
