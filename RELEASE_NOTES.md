@@ -20,7 +20,9 @@ Phase 5/6 - account-wide item management + profession-conditioned items
   inputs now parse correctly.
 - The `/dwm` options window now opens tall enough for the Items Overview /
   Roster tabs (was too short, leaving the scroll unusable), and your
-  resized/moved size & position now persist across sessions.
+  resized/moved size & position now persist across sessions. Shortened a few
+  option labels that were being truncated at default width (full text stays
+  in the hover tooltips).
 - Account-wide shortages now also surface passively: an "Unmet demand" line
   at the top of the options panel and on the minimap/broker tooltip.
 - **Bank-side config button.** A small draggable button appears while the
