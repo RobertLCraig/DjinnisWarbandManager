@@ -100,6 +100,23 @@ local function WarbandCount(itemID)
     return n
 end
 
+-- One-pass scan of the whole warband bank -> { [itemID] = totalCount }.
+-- Shared with ItemLedger (§14.1) so there is a single scan implementation.
+-- Only valid while the warband bank is reachable; caller checks readiness.
+function ItemEngine:ScanWarband()
+    local out = {}
+    for _, bag in ipairs(WarbandTabs()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, slot)
+            if id then
+                local info = SlotInfo(bag, slot)
+                out[id] = (out[id] or 0) + ((info and info.stackCount) or 0)
+            end
+        end
+    end
+    return out
+end
+
 -- First non-locked player stack of itemID: bag, slot, count.
 local function FindPlayerStack(itemID)
     for _, bag in ipairs(PlayerBags()) do

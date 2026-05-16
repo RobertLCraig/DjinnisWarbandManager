@@ -12,6 +12,14 @@
 
 ## Version: 0.3.2
 
+Phase 5 - account-wide item management (in progress).
+
+- New item ledger: persistent, advisory account snapshots of the warband bank
+  and each managed character's on-hand counts (captured at the bank and on
+  login; never gate a move).
+- `/dwm ledger` reports per-item warband stock, each character's
+  have -> intent, and shortages (e.g. "Enchanting Vellum SHORT 150").
+
 Phase 4 - polish (in progress).
 
 - Transaction log: every gold/item move is recorded (account-wide, capped).

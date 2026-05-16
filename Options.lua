@@ -334,7 +334,10 @@ local function BuildRosterArgs()
                 managed = {
                     type = "toggle", order = 3, name = L["OPT_MANAGE_NAME"], desc = L["OPT_MANAGE_DESC"],
                     get = function() return rec.managed ~= false end,
-                    set = function(_, v) rec.managed = v and true or false end,
+                    set = function(_, v)
+                        rec.managed = v and true or false
+                        if not v and ns.ItemLedger then ns.ItemLedger:WipeCharItems(key) end
+                    end,
                 },
                 autopurpose = {
                     type = "toggle", order = 4, name = L["OPT_AUTOPURPOSE_NAME"], desc = L["OPT_AUTOPURPOSE_DESC"],
@@ -472,7 +475,13 @@ local options = {
             get = function() local r = CurRec(); return r and r.managed ~= false end,
             set = function(_, v)
                 local r = CurRec()
-                if r then r.managed = v and true or false; ns.RefreshOptions() end
+                if r then
+                    r.managed = v and true or false
+                    if not v and ns.ItemLedger then
+                        ns.ItemLedger:WipeCharItems(ns.Roster and ns.Roster:CurrentKey())
+                    end
+                    ns.RefreshOptions()
+                end
             end,
         },
 
@@ -522,6 +531,11 @@ local options = {
             type = "execute", order = 34,
             name = L["OPT_LOG_PRINT_NAME"], desc = L["OPT_LOG_PRINT_DESC"],
             func = PrintLog,
+        },
+        ledger = {
+            type = "execute", order = 36,
+            name = L["OPT_LEDGER_NAME"], desc = L["OPT_LEDGER_DESC"],
+            func = function() if ns.ItemLedger then ns.ItemLedger:Print() end end,
         },
         logclear = {
             type = "execute", order = 35,
@@ -711,6 +725,7 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_ROSTER"]);   DWM:Print(L["CMD_HELP_STATUS"])
             DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
             DWM:Print(L["CMD_HELP_ITEMLIST"]); DWM:Print(L["CMD_HELP_LOG"])
+            DWM:Print(L["CMD_HELP_LEDGER"])
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end

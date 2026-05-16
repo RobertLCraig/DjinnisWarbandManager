@@ -23,6 +23,7 @@ Modules\Purposes.lua
 Modules\ProfessionDetect.lua
 Modules\Balancer.lua
 Modules\ItemEngine.lua
+Modules\ItemLedger.lua
 
 # Options (AceConfig table -> panel + slash commands)
 Options.lua

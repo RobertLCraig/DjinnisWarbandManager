@@ -198,6 +198,8 @@ function DWM:_TryTransitionReady()
     -- Gold first, then items (DESIGN S13.9 deterministic order).
     local ItemEngine = self:GetModule("ItemEngine", true)
     if ItemEngine then ItemEngine:Run("bank-open") end
+    -- Refresh the advisory warband snapshot now that we can see it (§14.1).
+    if ns.ItemLedger then ns.ItemLedger:SnapshotWarband() end
 end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)

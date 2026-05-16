@@ -147,12 +147,11 @@ function Purposes:DelItem(purposeName, itemID)
     return true
 end
 
--- Merged item targets for the CURRENT character:
--- purpose.items, then per-character itemOverrides win (false = unmanage that id).
+-- Merged item targets for ANY roster record (§14.2):
+-- the record's purpose.items, then its itemOverrides win (false = unmanage).
 -- Returns { [itemID] = { qty, mode } }
-function Purposes:ResolveItemsForCurrent()
+function Purposes:ResolveItemsFor(rec)
     local prof = DWM.db.profile
-    local rec  = ns.Roster and ns.Roster:Current()
     local out  = {}
     if not rec then return out end
 
@@ -173,6 +172,31 @@ function Purposes:ResolveItemsForCurrent()
         end
     end
     return out
+end
+
+-- Thin wrapper: targets for the current character (unchanged callers).
+function Purposes:ResolveItemsForCurrent()
+    return self:ResolveItemsFor(ns.Roster and ns.Roster:Current())
+end
+
+-- Every itemID referenced by any purpose or any character override (§14.2).
+-- Returns a set { [itemID] = true }.
+function Purposes:AllManagedItemIDs()
+    local set = {}
+    for _, p in pairs(DWM.db.profile.purposes or {}) do
+        if p.items then for id in pairs(p.items) do set[id] = true end end
+    end
+    local g = DWM.db.global and DWM.db.global.characters
+    if g then
+        for _, rec in pairs(g) do
+            if rec.itemOverrides then
+                for id, spec in pairs(rec.itemOverrides) do
+                    if spec ~= false then set[id] = true end
+                end
+            end
+        end
+    end
+    return set
 end
 
 -- Resolve the current character's gold target.
