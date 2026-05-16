@@ -240,11 +240,13 @@ function ItemEngine:BuildPlan()
     return plan, warns
 end
 
--- Signature of LIVE counts (on-character + warband) for every managed item.
--- A move is only "settled" once this changes - the on-character count from
--- C_Item.GetItemCount lags the actual transfer because warband moves are
--- server-confirmed and async (DESIGN S13.3). Issuing the next move before
--- this changes is exactly what caused a double-withdraw.
+-- Settle signature: ON-CHARACTER counts ONLY. The next decision (deposit vs
+-- withdraw vs done) keys on `have`, and GetItemCount lags server-confirmed
+-- warband transfers (DESIGN S13.3). Earlier this also hashed the warband
+-- count, which updates FIRST - so the gate saw "settled" while `have` was
+-- still stale and issued a redundant move (observed: withdraw 735 then
+-- deposit 235 back). Waiting only on the on-character count serializes moves
+-- correctly. Convergence still guarantees the final state regardless.
 local function CountSig()
     local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
     local ids = {}
@@ -252,7 +254,7 @@ local function CountSig()
     table.sort(ids)
     local parts = {}
     for _, id in ipairs(ids) do
-        parts[#parts + 1] = id .. "=" .. DWM:GetOnCharacterCount(id) .. "/" .. WarbandCount(id)
+        parts[#parts + 1] = id .. "=" .. DWM:GetOnCharacterCount(id)
     end
     return table.concat(parts, "|")
 end

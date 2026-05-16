@@ -21,6 +21,9 @@ Phase 3 - item balancing.
   when copied): amounts now print as comma-grouped, colored g/s/c text.
 - Fixed on-character item count wrongly including the character reagent
   *bank*, which could make "keep at least" over-deposit carried stacks.
+- Item moves are now efficient (no over-withdraw-then-deposit-back thrash):
+  the engine waits on the on-character count, which is what each decision
+  depends on, instead of the faster-updating warband count.
 - Fixed partial deposits/withdraws stranding on a full destination stack
   ("no further progress"): split moves now go to an empty slot, letting
   full-stack moves do server-side merging.
