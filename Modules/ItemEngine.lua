@@ -149,6 +149,20 @@ local function FindDestSlot(bags, itemID)
     return emptyBag, emptySlot
 end
 
+-- For a SPLIT placement we must use a strictly EMPTY slot. Dropping a split
+-- stack onto an existing partial stack overflows max-stack and strands items
+-- on the cursor (observed: deposit "stuck"). Full-stack moves go through
+-- UseContainerItem instead, where the server merges safely.
+local function FindEmptyDestSlot(bags)
+    for _, bag in ipairs(bags) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            if C_Container.GetContainerItemID(bag, slot) == nil then
+                return bag, slot
+            end
+        end
+    end
+end
+
 local function FreeSlots(bags)
     local n = 0
     for _, bag in ipairs(bags) do
@@ -285,10 +299,11 @@ function ItemEngine:_DoOneMove(plan)
                     C_Container.UseContainerItem(bag, slot, nil, BANKTYPE_ACCOUNT, false)
                     return true
                 end
-                -- partial: need a warband destination + empty cursor (S13.4)
+                -- partial: split into an EMPTY warband slot (S13.4); never a
+                -- partial stack (overflow strands the cursor).
                 if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
-                local dBag, dSlot = FindDestSlot(WarbandTabs(), e.itemID)
-                DWM:Debug("_DoOneMove deposit dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
+                local dBag, dSlot = FindEmptyDestSlot(WarbandTabs())
+                DWM:Debug("_DoOneMove deposit empty-dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
                 if dBag then
                     ClearCursor()
                     C_Container.SplitContainerItem(bag, slot, e.amount)
@@ -308,8 +323,9 @@ function ItemEngine:_DoOneMove(plan)
                     C_Container.UseContainerItem(bag, slot)
                     return true
                 end
-                if CursorBusy() then return false end
-                local dBag, dSlot = FindDestSlot(PlayerBags(), e.itemID)
+                if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
+                local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
+                DWM:Debug("_DoOneMove withdraw empty-dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
                 if dBag then
                     ClearCursor()
                     C_Container.SplitContainerItem(bag, slot, e.amount)
