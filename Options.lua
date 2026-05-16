@@ -94,6 +94,15 @@ local function PrintStatus()
     end
     DWM:Print(L["STATUS_CHAR_GOLD"]:format(DWM:FormatMoney(GetMoney())))
     DWM:Print(L["STATUS_WARBAND_GOLD"]:format(DWM:FormatMoney(DWM:GetWarbandGold())))
+    -- Item balancing state (this is the bit that was invisible before).
+    local nItems = 0
+    for _ in pairs(ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}) do
+        nItems = nItems + 1
+    end
+    DWM:Print(L["STATUS_ITEMS"]:format(P().itemEnabled and L["ON"] or L["OFF"]))
+    DWM:Print(L["STATUS_ITEMS_CONFIRMED"]:format(
+        P().itemFirstRunConfirmed and L["YES"] or L["NO"]))
+    DWM:Print(L["STATUS_ITEM_TARGETS"]:format(nItems))
     DWM:Print(L["STATUS_SIMULATE"]:format(P().simulate and L["ON"] or L["OFF"]))
     DWM:Print(L["STATUS_PAUSED"]:format(ns.sessionPaused and L["YES"] or L["NO"]))
 end
