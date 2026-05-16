@@ -17,6 +17,9 @@ Phase 3 - item balancing.
   bank like Mule).
 - Preset seeding is now forward-safe: new presets reach existing profiles,
   while presets you delete stay deleted.
+- The options panel now shows a live summary at the top - current character,
+  its purpose, and the resolved gold target - and names the character in the
+  "This Character" section, so the active purpose is obvious at a glance.
 
 - Balances stackable reagents toward per-character targets, the same model as
   gold: surplus deposits to the warband bank, shortfall withdraws.

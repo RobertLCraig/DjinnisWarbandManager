@@ -47,6 +47,8 @@ L["MSG_WITHDRAW_FAILED"] = "Withdraw did not complete (the bank may be busy); wi
 -- Options: groups
 L["OPT_GENERAL"] = "General"
 L["OPT_THISCHAR"] = "This Character"
+L["OPT_THISCHAR_NAMED"] = "This Character - %s"
+L["OPT_CURRENT_SUMMARY"] = "|cFF4FC3F7Current character:|r %s\n|cFF4FC3F7Purpose:|r %s\n|cFF4FC3F7Gold target:|r %s"
 L["OPT_PROFILES"] = "Profiles"
 
 -- Options: fields

@@ -99,6 +99,26 @@ local function PrintStatus()
 end
 ns.PrintStatus = PrintStatus
 
+-- Live one-glance summary for the top of the panel.
+local function CurrentSummary()
+    local rec = CurRec()
+    local who = (rec and ns.Roster and ns.Roster:Display(rec)) or UnitName("player") or "?"
+    local target, source, isMule, pname = DWM:GetEffectiveTargetCopper()
+    local tgt
+    if isMule then
+        tgt = L["MULE_LABEL"]
+    else
+        local srcTag = (source == "override") and L["STATUS_TARGET_SOURCE_OVERRIDE"]
+                                               or L["STATUS_TARGET_SOURCE_DEFAULT"]
+        tgt = DWM:FormatMoney(target) .. " " .. srcTag
+    end
+    local s = L["OPT_CURRENT_SUMMARY"]:format(who, tostring(pname or "?"), tgt)
+    if rec and rec.managed == false then
+        s = s .. "\n|cFFFF8080" .. L["STATUS_UNMANAGED"] .. "|r"
+    end
+    return s
+end
+
 local function PrintRoster()
     DWM:Print(L["ROSTER_HEADER"])
     local list = ns.Roster and ns.Roster:All() or {}
@@ -317,6 +337,10 @@ local options = {
     type = "group",
     name = L["ADDON_NAME"],
     args = {
+        summary = {
+            type = "description", order = 0, fontSize = "medium",
+            name = function() return CurrentSummary() .. "\n" end,
+        },
         enabled = {
             type = "toggle", order = 1, name = L["OPT_ENABLED_NAME"], desc = L["OPT_ENABLED_DESC"],
             get = function() return P().enabled end, set = function(_, v) P().enabled = v end,
@@ -339,14 +363,26 @@ local options = {
             end,
         },
 
-        hdr_char = { type = "header", order = 10, name = L["OPT_THISCHAR"] },
+        hdr_char = {
+            type = "header", order = 10,
+            name = function()
+                local r = CurRec()
+                return (r and ns.Roster)
+                    and L["OPT_THISCHAR_NAMED"]:format(ns.Roster:Display(r))
+                    or L["OPT_THISCHAR"]
+            end,
+        },
         purpose = {
             type = "select", order = 11, name = L["OPT_PURPOSE_NAME"], desc = L["OPT_PURPOSE_DESC"],
             values = PurposeValues,
             get = function() local r = CurRec(); return r and r.purpose end,
             set = function(_, v)
                 local r, k = CurRec()
-                if r then SetPurposeFor(r, k, v); DWM:Print(L["MSG_PURPOSE_SET"]:format(v)) end
+                if r then
+                    SetPurposeFor(r, k, v)
+                    DWM:Print(L["MSG_PURPOSE_SET"]:format(v))
+                    ns.RefreshOptions()
+                end
             end,
         },
         set = {
@@ -360,10 +396,11 @@ local options = {
             set = function(_, v)
                 local r = CurRec(); if not r then return end
                 v = tostring(v or ""):gsub("%s", "")
-                if v == "" then r.goldOverride = nil; return end
+                if v == "" then r.goldOverride = nil; ns.RefreshOptions(); return end
                 local g = ParseGold(v); if not g then return end
                 r.goldOverride = g
                 DWM:Print(L["MSG_SET_TARGET"]:format(UnitName("player"), DWM:FormatMoney(g * 10000)))
+                ns.RefreshOptions()
             end,
         },
         clearoverride = {
@@ -372,6 +409,7 @@ local options = {
                 local r = CurRec(); if not r then return end
                 r.goldOverride = nil
                 DWM:Print(L["MSG_CLEARED_OVERRIDE"]:format(tostring(r.purpose or "?")))
+                ns.RefreshOptions()
             end,
         },
         autopurpose = {
@@ -382,7 +420,10 @@ local options = {
         manage = {
             type = "toggle", order = 15, name = L["OPT_MANAGE_NAME"], desc = L["OPT_MANAGE_DESC"],
             get = function() local r = CurRec(); return r and r.managed ~= false end,
-            set = function(_, v) local r = CurRec(); if r then r.managed = v and true or false end end,
+            set = function(_, v)
+                local r = CurRec()
+                if r then r.managed = v and true or false; ns.RefreshOptions() end
+            end,
         },
 
         hdr_purposes = { type = "header", order = 20, name = L["OPT_PURPOSES"] },
