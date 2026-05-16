@@ -15,6 +15,9 @@
 Phase 5/6 - account-wide item management + profession-conditioned items
 (in progress).
 
+- **Fixed: entering a gold value in the options panel errored** ("base out
+  of range") and silently failed - a `tonumber(gsub(...))` mistake. Gold
+  inputs now parse correctly.
 - **Profession-conditioned item targets.** An item can require a profession
   (and optional min skill); each character's professions are recorded on
   login. The Crafter preset's Enchanting Vellum now requires Enchanting, so a

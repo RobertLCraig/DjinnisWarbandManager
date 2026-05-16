@@ -14,7 +14,10 @@ local L = ns.L
 local function P() return DWM.db.profile end
 
 local function ParseGold(input)
-    local n = tonumber((tostring(input or "")):gsub("[%s,]", ""))
+    -- gsub returns (string, count); a single-var assignment discards the
+    -- count, so tonumber gets only the string (not count as its base).
+    local s = tostring(input or ""):gsub("[%s,]", "")
+    local n = tonumber(s)
     if not n or n < 0 then return nil end
     return math.floor(n)
 end
