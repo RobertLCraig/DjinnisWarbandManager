@@ -257,6 +257,48 @@ function ItemEngine:BuildPlan()
     return plan, warns
 end
 
+-- §14.5: quantified residual shortfalls from CURRENT live state. Only `exact`
+-- can be "short" (keepmin/depositall never withdraw). short = how many still
+-- missing even if we took every one the warband has. Returns sorted list:
+-- { id, name, short, have, qty, wb }.
+function ItemEngine:ResidualShortfalls()
+    local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
+    local ids = {}
+    for id in pairs(targets) do ids[#ids + 1] = id end
+    table.sort(ids)
+    local out = {}
+    for _, id in ipairs(ids) do
+        local spec = targets[id]
+        if (spec.mode or "keepmin") == "exact" then
+            local qty  = spec.qty or 0
+            local have = DWM:GetOnCharacterCount(id)
+            if have < qty then
+                local wb = WarbandCount(id)
+                local short = qty - have - wb
+                if short > 0 then
+                    out[#out + 1] = {
+                        id = id, name = ItemName(id),
+                        short = short, have = have, qty = qty, wb = wb,
+                    }
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- Print residual shortfalls. Always shown (even on silent bank-open runs):
+-- "not enough in the warband" is exactly what the user asked to be told.
+function ItemEngine:_ReportShortfalls()
+    local short = self:ResidualShortfalls()
+    if #short == 0 then return end
+    DWM:Print(L["MSG_ITEM_SHORT_HEADER"])
+    for _, s in ipairs(short) do
+        DWM:Print("  |cFFFF5555" .. L["MSG_ITEM_STILL_SHORT"]:format(
+            s.short, s.name, s.wb) .. "|r")
+    end
+end
+
 -- Settle signature: ON-CHARACTER counts ONLY. The next decision (deposit vs
 -- withdraw vs done) keys on `have`, and GetItemCount lags server-confirmed
 -- warband transfers (DESIGN S13.3). Earlier this also hashed the warband
@@ -298,6 +340,9 @@ function ItemEngine:_Finish(reason)
     if s.moves > 0 or s.verbose then
         DWM:Print(L["MSG_ITEM_DONE"]:format(s.moves))
     end
+    -- §14.5: after the pass, tell the user about anything still short because
+    -- the warband ran out - always, even on a silent bank-open run.
+    self:_ReportShortfalls()
 end
 
 function ItemEngine:Abort(reason)
@@ -507,6 +552,9 @@ function ItemEngine:Run(reason)
             end
             for _, w in ipairs(warns) do DWM:Print("  |cFFFFCC00" .. w .. "|r") end
         end
+        -- §14.5: quantified shortage prediction in the dry-run, even when the
+        -- plan is empty (nothing to do, yet still short because warband=0).
+        self:_ReportShortfalls()
         return
     end
 

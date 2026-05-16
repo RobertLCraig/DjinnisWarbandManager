@@ -28,6 +28,9 @@ Phase 5 - account-wide item management (in progress).
   login; never gate a move).
 - `/dwm ledger` reports per-item warband stock, each character's
   have -> intent, and shortages (e.g. "Enchanting Vellum SHORT 150").
+- When the warband bank can't fully top a character up, it now says exactly
+  how much is still short (e.g. "still short 150 x Enchanting Vellum
+  (warband holds 0)") - in both simulate and live runs at the bank.
 
 Phase 4 - polish (in progress).
 
