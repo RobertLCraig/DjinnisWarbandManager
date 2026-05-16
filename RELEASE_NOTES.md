@@ -18,6 +18,11 @@ Phase 5/6 - account-wide item management + profession-conditioned items
 - **Fixed: entering a gold value in the options panel errored** ("base out
   of range") and silently failed - a `tonumber(gsub(...))` mistake. Gold
   inputs now parse correctly.
+- **New "Items Overview" options tab.** One entry per managed item showing
+  warband stock and an OK / SHORT n / NO DATA headline, the per-purpose
+  quantity / mode / required-profession / min-skill editors, and a
+  per-character "have -> intent" breakdown - the single place to see and
+  manage what's balanced between which characters.
 - **Profession-conditioned item targets.** An item can require a profession
   (and optional min skill); each character's professions are recorded on
   login. The Crafter preset's Enchanting Vellum now requires Enchanting, so a

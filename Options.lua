@@ -390,6 +390,137 @@ local function BuildLogArgs()
     return args
 end
 
+-- Profession dropdown values: 0 = no gate, then each known profession.
+local function ProfValues()
+    local v = { [0] = L["LEDGER_NONE"] }
+    for id, name in pairs(ns.PROFESSIONS or {}) do v[id] = name end
+    return v
+end
+
+-- §14.4 item-centric overview: one entry per managed item, headed by warband
+-- stock + OK/SHORT/NO DATA, with per-purpose qty/mode/profession editors and
+-- per-character have->intent lines (from the shared BuildReport).
+local function BuildOverviewArgs()
+    local idset = ns.Purposes and ns.Purposes:AllManagedItemIDs() or {}
+    local ids = {}
+    for id in pairs(idset) do ids[#ids + 1] = id end
+    table.sort(ids)
+    if #ids == 0 then
+        return { _empty = { type = "description", order = 1, name = L["OVERVIEW_EMPTY"] } }
+    end
+
+    local report = ns.ItemLedger and ns.ItemLedger:BuildReport() or {}
+    local byId = {}
+    for _, r in ipairs(report) do byId[r.id] = r end
+
+    local function Spec(pn, id) return (ns.Purposes:Get(pn) or {}).items
+        and ns.Purposes:Get(pn).items[id] or nil end
+
+    local args, order = {}, 1
+    for _, id in ipairs(ids) do
+        local r = byId[id]
+        local nm = (r and r.name) or ItemDisplayName(id)
+        local wb = r and r.warband or 0
+        local tag = ""
+        if r and r.shortBy > 0 then
+            tag = "  |cFFFF5555" .. L["LEDGER_SHORT"]:format(r.shortBy) .. "|r"
+        elseif r and (r.unknown or 0) > 0 then
+            tag = "  |cFFFFCC00" .. L["LEDGER_NODATA"] .. "|r"
+        elseif r then
+            tag = "  |cFF55FF55" .. L["LEDGER_OK"] .. "|r"
+        end
+
+        local grp = {
+            type = "group", inline = true, order = order,
+            name = ("%s |cFFAAAAAA(%d)|r  wb %d%s"):format(nm, id, wb, tag),
+            args = {},
+        }
+        local sub = 1
+
+        for _, pn in ipairs(ns.Purposes:Names()) do
+            if Spec(pn, id) then
+                local PN = pn
+                grp.args["p" .. sub] = {
+                    type = "group", inline = true, order = sub,
+                    name = "|cFF4FC3F7" .. PN .. "|r",
+                    args = {
+                        qty = {
+                            type = "input", order = 1, name = L["OPT_ITEM_QTY"], width = 0.6,
+                            get = function() return tostring((Spec(PN, id) or {}).qty or 0) end,
+                            validate = function(_, v) return ParseGold(v) ~= nil or L["OPT_ITEM_QTY"] end,
+                            set = function(_, v)
+                                ns.Purposes:SetItem(PN, id, ParseGold(v) or 0, (Spec(PN, id) or {}).mode)
+                                ns.RefreshOptions()
+                            end,
+                        },
+                        mode = {
+                            type = "select", order = 2, name = L["OPT_ITEM_MODE"],
+                            values = MODE_VALUES, sorting = { "keepmin", "exact", "depositall" },
+                            get = function() return (Spec(PN, id) or {}).mode or "keepmin" end,
+                            set = function(_, v)
+                                ns.Purposes:SetItem(PN, id, (Spec(PN, id) or {}).qty or 0, v)
+                                ns.RefreshOptions()
+                            end,
+                        },
+                        prof = {
+                            type = "select", order = 3, name = L["OPT_ITEM_PROF"],
+                            values = ProfValues,
+                            get = function() return (Spec(PN, id) or {}).prof or 0 end,
+                            set = function(_, v)
+                                ns.Purposes:SetItemProf(PN, id, (v ~= 0) and v or nil,
+                                    (Spec(PN, id) or {}).minSkill)
+                                ns.RefreshOptions()
+                            end,
+                        },
+                        minskill = {
+                            type = "input", order = 4, name = L["OPT_ITEM_MINSKILL"], width = 0.5,
+                            get = function()
+                                local s = Spec(PN, id) or {}
+                                return s.minSkill and tostring(s.minSkill) or ""
+                            end,
+                            set = function(_, v)
+                                local s = Spec(PN, id) or {}
+                                ns.Purposes:SetItemProf(PN, id, s.prof, tonumber((tostring(v):gsub("%D", ""))))
+                                ns.RefreshOptions()
+                            end,
+                            disabled = function() return not (Spec(PN, id) or {}).prof end,
+                        },
+                        del = {
+                            type = "execute", order = 5, name = L["OPT_ITEM_DEL"],
+                            func = function()
+                                ns.Purposes:DelItem(PN, id)
+                                DWM:Print(L["MSG_PURPOSE_ITEM_DEL"]:format(PN, ItemDisplayName(id)))
+                                ns.RefreshOptions()
+                            end,
+                        },
+                    },
+                }
+                sub = sub + 1
+            end
+        end
+
+        if r and r.chars then
+            for _, c in ipairs(r.chars) do
+                local intentTxt = (c.intent == "ok" and L["LEDGER_KEEP"])
+                    or (c.intent == "unknown" and "?")
+                    or ((c.intent == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"])
+                        .. " " .. c.amount)
+                grp.args["c" .. sub] = {
+                    type = "description", order = 100 + sub, fontSize = "small",
+                    name = ("|cFFFFFFFF%s|r: have %s -> %s |cFF666666(%s)|r"):format(
+                        c.name, (c.have ~= nil and tostring(c.have) or "?"),
+                        intentTxt, c.age),
+                }
+                sub = sub + 1
+            end
+        end
+
+        args["i" .. order] = grp
+        order = order + 1
+    end
+    return args
+end
+
 --============================================================================
 -- Static options tree (top-level keys -> short /dwm commands)
 --============================================================================
@@ -512,6 +643,7 @@ local options = {
         },
         purposeedit = { type = "group", order = 22, name = L["OPT_PURPOSES"], args = {} },
         rostertab   = { type = "group", order = 23, name = L["OPT_ROSTER"],   args = {} },
+        itemsoverview = { type = "group", order = 23.5, name = L["OPT_OVERVIEW"], args = {} },
 
         hdr_items = { type = "header", order = 24, name = L["OPT_ITEMS"] },
         itemenable = {
@@ -741,6 +873,7 @@ local options = {
 function ns.RefreshOptions()
     options.args.purposeedit.args = BuildPurposeEditArgs()
     options.args.rostertab.args   = BuildRosterArgs()
+    options.args.itemsoverview.args = BuildOverviewArgs()
     options.args.logtab.args      = BuildLogArgs()
     local reg = LibStub("AceConfigRegistry-3.0", true)
     if reg then reg:NotifyChange(ADDON_NAME) end
@@ -753,6 +886,7 @@ function ns.SetupOptions()
 
     options.args.purposeedit.args = BuildPurposeEditArgs()
     options.args.rostertab.args   = BuildRosterArgs()
+    options.args.itemsoverview.args = BuildOverviewArgs()
     options.args.logtab.args      = BuildLogArgs()
 
     options.args.profiles = LibStub("AceDBOptions-3.0"):GetOptionsTable(DWM.db)
