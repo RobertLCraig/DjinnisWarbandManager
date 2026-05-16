@@ -58,6 +58,7 @@ local defaults = {
         -- the live profile by Purposes:Seed() so users can delete them without
         -- AceDB resurrecting them. _seeded guards the one-time seed/migration.
         minimap = { hide = false },
+        bankButton = { hide = false, point = "CENTER", relPoint = "CENTER", x = 0, y = 220 },
     },
     -- Phase 1 per-character fields kept ONLY for one-time migration into the
     -- global roster (Roster:EnsureCurrent). New config lives in db.global.

@@ -564,6 +564,15 @@ local options = {
                 DWM:Print("Debug tracing: " .. (v and L["ON"] or L["OFF"]))
             end,
         },
+        bankbutton = {
+            type = "toggle", order = 6,
+            name = L["OPT_BANKBTN_NAME"], desc = L["OPT_BANKBTN_DESC"],
+            get = function() return not P().bankButton.hide end,
+            set = function(_, v)
+                P().bankButton.hide = not v
+                if ns.BankButton then ns.BankButton:Refresh() end
+            end,
+        },
 
         hdr_char = {
             type = "header", order = 10,

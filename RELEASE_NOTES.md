@@ -18,6 +18,10 @@ Phase 5/6 - account-wide item management + profession-conditioned items
 - **Fixed: entering a gold value in the options panel errored** ("base out
   of range") and silently failed - a `tonumber(gsub(...))` mistake. Gold
   inputs now parse correctly.
+- **Bank-side config button.** A small draggable button appears while the
+  bank is open; click to open options, right-click to pause/resume, drag to
+  reposition (saved). Frame-independent, so it works with Baganator, Bagnon,
+  ArkInventory, OneBag, and the default UI. Toggle in options.
 - **New "Items Overview" options tab.** One entry per managed item showing
   warband stock and an OK / SHORT n / NO DATA headline, the per-purpose
   quantity / mode / required-profession / min-skill editors, and a
