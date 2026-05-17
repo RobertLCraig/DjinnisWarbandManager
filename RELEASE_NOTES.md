@@ -18,6 +18,10 @@ Phase 5/6 - account-wide item management + profession-conditioned items
 - **Fixed: entering a gold value in the options panel errored** ("base out
   of range") and silently failed - a `tonumber(gsub(...))` mistake. Gold
   inputs now parse correctly.
+- "Sort warband bank after item moves" now only triggers when a managed item
+  is actually fragmented (more stacks than needed); it no longer fires a
+  full sort after every move. (Note: the bank's own per-deposit category
+  re-arrange is Blizzard's and unaffected by this setting.)
 - The `/dwm` options window now opens tall enough for the Items Overview /
   Roster tabs (was too short, leaving the scroll unusable), and your
   resized/moved size & position now persist across sessions. Shortened a few

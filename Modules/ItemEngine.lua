@@ -322,6 +322,33 @@ end
 -- Executor - one physical move per step, paced by events, convergent
 --============================================================================
 
+-- True only if some MANAGED item is fragmented in the warband: more stacks
+-- than strictly needed (#stacks > ceil(total / maxStack)). A single stack, or
+-- already-optimal full stacks, returns false - so a sort that wouldn't
+-- actually consolidate anything is skipped (the reported over-eager sort).
+function ItemEngine:_WarbandNeedsTidy()
+    local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
+    for id in pairs(targets) do
+        local stacks, total = 0, 0
+        for _, bag in ipairs(WarbandTabs()) do
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                if C_Container.GetContainerItemID(bag, slot) == id then
+                    local info = SlotInfo(bag, slot)
+                    local c = (info and info.stackCount) or 0
+                    if c > 0 then stacks = stacks + 1; total = total + c end
+                end
+            end
+        end
+        if stacks >= 2 then
+            local max = MaxStack(id)
+            if max and max > 0 and stacks > math.ceil(total / max) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function ItemEngine:_Finish(reason)
     if not self.session then return end
     local s = self.session
@@ -331,11 +358,19 @@ function ItemEngine:_Finish(reason)
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
     ClearCursor()
-    -- Optional: consolidate the warband stacks our empty-slot splits fragment.
-    -- Single server-side call (DESIGN S3); only when we actually moved things.
-    if s.moves > 0 and DWM.db.profile.sortAfterItems
-        and C_Container and C_Container.SortBank then
-        pcall(C_Container.SortBank, BANKTYPE_ACCOUNT)
+    -- Optional explicit full sort, ONLY when our moves actually left a managed
+    -- item fragmented (>1 stack that could be combined). Note: this is the
+    -- addon's C_Container.SortBank; the bank's own per-deposit category reflow
+    -- is Blizzard and not controlled here.
+    if s.moves > 0 and C_Container and C_Container.SortBank then
+        if not DWM.db.profile.sortAfterItems then
+            DWM:Debug("sort: disabled (sortAfterItems=false) - not sorting")
+        elseif self:_WarbandNeedsTidy() then
+            DWM:Debug("sort: fragmentation found -> C_Container.SortBank")
+            pcall(C_Container.SortBank, BANKTYPE_ACCOUNT)
+        else
+            DWM:Debug("sort: enabled but nothing fragmented -> skip")
+        end
     end
     if s.moves > 0 or s.verbose then
         DWM:Print(L["MSG_ITEM_DONE"]:format(s.moves))
