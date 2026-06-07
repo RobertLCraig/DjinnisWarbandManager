@@ -19,6 +19,7 @@ ignore:
   - tests
   - .busted
   - .luacheckrc
+  - TESTING.md
 
 manual-changelog:
   filename: CHANGELOG.md
