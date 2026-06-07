@@ -81,7 +81,6 @@ local LOG_CAP = 200
 ns.sessionPaused = false
 ns.bankState = "closed"               -- "closed" | "opening" | "ready"
 
-local sawBanker = false
 local uiReady = false
 local ranThisOpen = false
 
@@ -155,6 +154,18 @@ function DWM:GetWarbandGold()
     return 0
 end
 
+-- Shared click action for the LDB broker, the minimap icon, and the bank
+-- button so the three can never drift: left opens the options panel, right
+-- toggles the session pause.
+function DWM:HandleActionClick(mouseButton)
+    if mouseButton == "RightButton" then
+        ns.sessionPaused = not ns.sessionPaused
+        self:Print(L["STATUS_PAUSED"]:format(ns.sessionPaused and L["YES"] or L["NO"]))
+    else
+        LibStub("AceConfigDialog-3.0"):Open(ADDON_NAME)
+    end
+end
+
 -- Override AceConsole's Print with a tidy colored prefix.
 function DWM:Print(msg)
     print("|cFF4FC3F7" .. L["ADDON_NAME"] .. ":|r " .. tostring(msg))
@@ -186,7 +197,6 @@ end
 
 local function ResetBankState()
     ns.bankState = "closed"
-    sawBanker = false
     uiReady = false
     ranThisOpen = false
 end
@@ -224,7 +234,6 @@ end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)
     if BANKER_TYPES[interactionType] then
-        sawBanker = true
         if ns.bankState == "closed" then ns.bankState = "opening" end
         self:Debug("bank: interaction show type=" .. tostring(interactionType))
         self:_TryTransitionReady()
@@ -270,15 +279,7 @@ local function BuildBroker()
         type = "data source",
         text = L["ADDON_NAME"],
         icon = "Interface\\Icons\\achievement_guildperk_mobilebanking",
-        OnClick = function(_, button)
-            if button == "RightButton" then
-                ns.sessionPaused = not ns.sessionPaused
-                DWM:Print(string.format(L["STATUS_PAUSED"],
-                    ns.sessionPaused and L["YES"] or L["NO"]))
-            else
-                LibStub("AceConfigDialog-3.0"):Open(ADDON_NAME)
-            end
-        end,
+        OnClick = function(_, button) DWM:HandleActionClick(button) end,
         OnTooltipShow = function(tt)
             tt:AddLine(L["BROKER_TOOLTIP_TITLE"])
             local target, _, isMule, pname = DWM:GetEffectiveTargetCopper()

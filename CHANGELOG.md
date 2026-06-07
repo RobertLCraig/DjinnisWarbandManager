@@ -4,6 +4,34 @@ All notable changes to Djinni's Warband Manager are documented here.
 
 ---
 
+## [0.3.2-beta] - 2026-06-07
+
+Usability + maintenance.
+
+- **Bank button now anchors to your bank.** Instead of floating loose in the
+  middle of the screen, it attaches to whatever bank window is actually open -
+  Baganator's bank view first, then Bagnon / Combuctor / ArkInventory, then the
+  default Blizzard bank. If none is recognized it falls back to the old
+  free-floating, draggable button, so it can never error or vanish. You can
+  still drag it to fine-tune its position relative to the bank.
+- Fixed the bank button not appearing when you enabled it from the options
+  panel while the bank was already open.
+- **"Sort after item moves" is now a targeted consolidation.** It merges only
+  the small leftover stacks of the items you manage into full stacks, instead of
+  running Blizzard's sort on the entire warband bank. Much faster, and it leaves
+  category bag addons (Baganator, etc.) alone. The option was renamed to
+  "Consolidate managed stacks after item moves" to match.
+- Internal: the broker, minimap icon, and bank button now share one click
+  handler so their behavior can't drift.
+
+### Developer
+- Added a standalone, headless test suite (busted) with a mock WoW API, plus
+  luacheck static analysis and a GitHub Actions CI workflow. Tests cover gold
+  target resolution, item balance planning, residual shortfalls, and the new
+  stack consolidation - no game client required.
+
+---
+
 ## [0.3.1-beta] - 2026-05-16
 
 Phase 3 - item balancing.

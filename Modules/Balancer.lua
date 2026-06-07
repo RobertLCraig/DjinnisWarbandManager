@@ -72,7 +72,7 @@ end
 -- Internal
 --============================================================================
 
-function Balancer:_DoGold(manual, simulate, verbose)
+function Balancer:_DoGold(_manual, simulate, verbose)
     local mode = DWM.db.profile.mode or "both"
     local charGold = GetMoney() or 0
     local warbandGold = DWM:GetWarbandGold()

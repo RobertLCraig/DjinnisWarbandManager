@@ -145,27 +145,6 @@ local function FindWarbandStack(itemID)
     end
 end
 
--- A destination slot for a partial move: prefer a same-item stack with room,
--- else an empty slot. `bags` is the destination container list.
-local function FindDestSlot(bags, itemID)
-    local max = MaxStack(itemID)
-    local emptyBag, emptySlot
-    for _, bag in ipairs(bags) do
-        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            local id = C_Container.GetContainerItemID(bag, slot)
-            if id == itemID and max then
-                local info = SlotInfo(bag, slot)
-                if info and not info.isLocked and (info.stackCount or 0) < max then
-                    return bag, slot
-                end
-            elseif id == nil and not emptyBag then
-                emptyBag, emptySlot = bag, slot
-            end
-        end
-    end
-    return emptyBag, emptySlot
-end
-
 -- For a SPLIT placement we must use a strictly EMPTY slot. Dropping a split
 -- stack onto an existing partial stack overflows max-stack and strands items
 -- on the cursor (observed: deposit "stuck"). Full-stack moves go through
@@ -318,60 +297,107 @@ local function CountSig()
     return table.concat(parts, "|")
 end
 
---============================================================================
--- Executor - one physical move per step, paced by events, convergent
---============================================================================
-
--- True only if some MANAGED item is fragmented in the warband: more stacks
--- than strictly needed (#stacks > ceil(total / maxStack)). A single stack, or
--- already-optimal full stacks, returns false - so a sort that wouldn't
--- actually consolidate anything is skipped (the reported over-eager sort).
-function ItemEngine:_WarbandNeedsTidy()
+-- Settle signature for the CONSOLIDATION phase: the multiset of managed-item
+-- stack sizes currently in the warband. A merge shrinks or removes a stack, so
+-- this changes when a merge lands - whereas on-character counts (CountSig)
+-- never move during a warband-internal merge, so the balance gate can't see it.
+local function WarbandSig()
     local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
-    for id in pairs(targets) do
-        local stacks, total = 0, 0
+    local ids = {}
+    for id in pairs(targets) do ids[#ids + 1] = id end
+    table.sort(ids)
+    local parts = {}
+    for _, id in ipairs(ids) do
+        local counts = {}
         for _, bag in ipairs(WarbandTabs()) do
             for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
                 if C_Container.GetContainerItemID(bag, slot) == id then
                     local info = SlotInfo(bag, slot)
-                    local c = (info and info.stackCount) or 0
-                    if c > 0 then stacks = stacks + 1; total = total + c end
+                    counts[#counts + 1] = (info and info.stackCount) or 0
                 end
             end
         end
-        if stacks >= 2 then
-            local max = MaxStack(id)
-            if max and max > 0 and stacks > math.ceil(total / max) then
-                return true
+        table.sort(counts)
+        parts[#parts + 1] = id .. "=" .. table.concat(counts, ",")
+    end
+    return table.concat(parts, "|")
+end
+
+--============================================================================
+-- Executor - one physical move per step, paced by events, convergent
+--============================================================================
+
+-- Choose ONE consolidation move among MANAGED items only: top up a partial
+-- warband stack toward its max from another partial stack of the same item.
+-- Deliberately scoped to managed items and done with our own cursor moves -
+-- NOT C_Container.SortBank, which reorders the entire warband bank (slow, and
+-- it fights category bag addons like Baganator). Returns src{bag,slot,count},
+-- dst{bag,slot,count}, amount - or nil when nothing is worth merging.
+function ItemEngine:_PickMerge()
+    local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
+    local ids = {}
+    for id in pairs(targets) do ids[#ids + 1] = id end
+    table.sort(ids)   -- deterministic order (S13.9)
+
+    for _, id in ipairs(ids) do
+        local max = MaxStack(id)
+        if max and max > 0 then
+            local stacks = {}
+            for _, bag in ipairs(WarbandTabs()) do
+                for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                    if C_Container.GetContainerItemID(bag, slot) == id then
+                        local info = SlotInfo(bag, slot)
+                        if info and not info.isLocked then
+                            local c = info.stackCount or 0
+                            if c > 0 and c < max then
+                                stacks[#stacks + 1] = { bag = bag, slot = slot, count = c }
+                            end
+                        end
+                    end
+                end
+            end
+            -- Need two partial stacks to merge. Empty the smallest into the
+            -- next-smallest: deterministic and convergent (each merge either
+            -- frees a slot or fills one to max, so fragmentation only drops).
+            if #stacks >= 2 then
+                table.sort(stacks, function(a, b) return a.count < b.count end)
+                local src, dst = stacks[1], stacks[2]
+                local amount = math.min(src.count, max - dst.count)
+                if amount > 0 then return src, dst, amount end
             end
         end
     end
-    return false
+    return nil
+end
+
+-- Execute one consolidation move picked by _PickMerge. Splits exactly enough
+-- to fill the destination so a drop can never overflow and strand the cursor
+-- (S13.4). Returns true if a move was issued.
+function ItemEngine:_DoOneMerge()
+    if CursorBusy() then return false end
+    local src, dst, amount = self:_PickMerge()
+    if not src then return false end
+    ClearCursor()
+    if amount >= src.count then
+        C_Container.PickupContainerItem(src.bag, src.slot)        -- whole stack
+    else
+        C_Container.SplitContainerItem(src.bag, src.slot, amount) -- partial
+    end
+    C_Container.PickupContainerItem(dst.bag, dst.slot)
+    return true
 end
 
 function ItemEngine:_Finish(reason)
     if not self.session then return end
     local s = self.session
-    DWM:Debug(("_Finish reason=%s moves=%d iters=%d"):format(
-        tostring(reason), s.moves or 0, s.iters or 0))
+    DWM:Debug(("_Finish reason=%s moves=%d merges=%d iters=%d"):format(
+        tostring(reason), s.moves or 0, s.merges or 0, s.iters or 0))
     self.session = nil
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
     ClearCursor()
-    -- Optional explicit full sort, ONLY when our moves actually left a managed
-    -- item fragmented (>1 stack that could be combined). Note: this is the
-    -- addon's C_Container.SortBank; the bank's own per-deposit category reflow
-    -- is Blizzard and not controlled here.
-    if s.moves > 0 and C_Container and C_Container.SortBank then
-        if not DWM.db.profile.sortAfterItems then
-            DWM:Debug("sort: disabled (sortAfterItems=false) - not sorting")
-        elseif self:_WarbandNeedsTidy() then
-            DWM:Debug("sort: fragmentation found -> C_Container.SortBank")
-            pcall(C_Container.SortBank, BANKTYPE_ACCOUNT)
-        else
-            DWM:Debug("sort: enabled but nothing fragmented -> skip")
-        end
-    end
+    -- Consolidation (the "sortAfterItems" option) now happens inline during the
+    -- run as a merge phase scoped to managed items - no whole-bank SortBank.
     if s.moves > 0 or s.verbose then
         DWM:Print(L["MSG_ITEM_DONE"]:format(s.moves))
     end
@@ -380,7 +406,7 @@ function ItemEngine:_Finish(reason)
     self:_ReportShortfalls()
 end
 
-function ItemEngine:Abort(reason)
+function ItemEngine:Abort(_reason)
     if not self.session then return end
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
@@ -453,12 +479,15 @@ function ItemEngine:_Step()
     if not s then return end
     if not DWM:IsWarbandUsable() then return self:Abort("warband-gone") end
 
-    -- SETTLE GATE: never issue the next move until the previous one is
-    -- actually reflected in live counts. Warband transfers are server-
-    -- confirmed and async, so GetItemCount lags; recomputing too early made
-    -- the plan repeat and double-moved (DESIGN S13.3/S13.11).
+    -- SETTLE GATE: never issue the next move until the previous one is actually
+    -- reflected in live state. Warband transfers are server-confirmed and
+    -- async, so reads lag; recomputing too early made the plan repeat and
+    -- double-move (DESIGN S13.3/S13.11). The signature is phase-specific:
+    -- balance waits on on-character counts (what each decision keys on);
+    -- consolidation waits on the warband stack layout (a merge never changes
+    -- on-character counts, so CountSig would never settle).
     if s.awaiting then
-        if CountSig() == s.preSig then
+        if s.sigFn() == s.preSig then
             s.waitTicks = (s.waitTicks or 0) + 1
             if s.waitTicks > MAX_WAIT then
                 if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
@@ -473,9 +502,6 @@ function ItemEngine:_Step()
     s.iters = s.iters + 1
     if s.iters > ITER_CAP then return self:_Finish("cap") end
 
-    local plan = self:BuildPlan()
-    if #plan == 0 then return self:_Finish("done") end
-
     if CursorBusy() then
         -- Another addon (or us) holds the cursor; wait briefly, then give up
         -- rather than fight over it (S13.4).
@@ -488,9 +514,34 @@ function ItemEngine:_Step()
     end
     s.cursorWaits = 0
 
+    -- CONSOLIDATION phase: balancing is done; optionally merge the small stacks
+    -- split moves leave behind - managed items only, never a whole-bank sort.
+    if s.phase == "merge" then
+        if not DWM.db.profile.sortAfterItems then return self:_Finish("done") end
+        s.sigFn = WarbandSig
+        s.preSig = s.sigFn()
+        if not self:_DoOneMerge() then return self:_Finish("done") end
+        s.merges = (s.merges or 0) + 1
+        s.awaiting = true
+        s.waitTicks = 0
+        return self:_Arm()
+    end
+
+    -- BALANCE phase.
+    local plan = self:BuildPlan()
+    if #plan == 0 then
+        -- Nothing left to balance; enter consolidation only if it's enabled and
+        -- there is actually something to merge (skips a pointless extra pass).
+        if DWM.db.profile.sortAfterItems and self:_PickMerge() then
+            s.phase = "merge"
+            return self:_Step()
+        end
+        return self:_Finish("done")
+    end
+
     -- Snapshot live counts BEFORE issuing so the settle gate can detect the
     -- effect of exactly this move.
-    s.preSig = CountSig()
+    s.preSig = s.sigFn()
     local issued = self:_DoOneMove(plan)
     if not issued then
         if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
@@ -600,8 +651,9 @@ function ItemEngine:Run(reason)
 
     DWM:Debug("Run: starting session")
     self.session = {
-        iters = 0, moves = 0, verbose = verbose,
+        iters = 0, moves = 0, merges = 0, verbose = verbose,
         awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,
+        phase = "balance", sigFn = CountSig,
     }
     if not self._bucket then
         self._bucket = self:RegisterBucketEvent(

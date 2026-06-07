@@ -16,6 +16,9 @@ ignore:
   - pkgmeta.yaml
   - DESIGN.md
   - releases
+  - tests
+  - .busted
+  - .luacheckrc
 
 manual-changelog:
   filename: CHANGELOG.md

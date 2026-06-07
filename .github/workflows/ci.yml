@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, "claude/**" ]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 + LuaRocks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 liblua5.1-0-dev luarocks
+
+      - name: Install luacheck + busted
+        run: |
+          sudo luarocks install luacheck
+          sudo luarocks install busted
+
+      - name: Luacheck (static analysis)
+        run: luacheck Core.lua Options.lua Modules/ Locales/ tests/
+
+      - name: Busted (unit tests)
+        run: busted
