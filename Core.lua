@@ -24,9 +24,12 @@ ns.L = L
 local BANKTYPE_ACCOUNT = (Enum and Enum.BankType and Enum.BankType.Account) or 2
 
 -- Any of these banker interactions open the unified BankFrame; the warband
--- bank is reachable from ALL of them (verified in wow-ui-source:
--- PlayerInteractionFrameManager maps Banker/CharacterBanker/AccountBanker ->
--- BankFrame). Requiring AccountBanker(68) only was a bug: a normal banker
+-- bank is reachable from ALL of them. Re-verified against wow-ui-source 12.1.0:
+-- BankFrame.lua RegisterWithPlayerInteractionManager() registers Banker,
+-- CharacterBanker and AccountBanker against the same BankFrame frameInfo. (In
+-- 12.1.0 that mapping moved out of PlayerInteractionFrameManager, which became
+-- a registration API and no longer exposes a global frame of that name.)
+-- Requiring AccountBanker(68) only was a bug: a normal banker
 -- fires Banker(8)/CharacterBanker(67), so auto-balance never triggered in
 -- normal play. We accept the whole set and gate the ACTION on
 -- IsWarbandUsable() instead.

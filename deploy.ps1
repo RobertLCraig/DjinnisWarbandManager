@@ -19,12 +19,16 @@ $ExcludeFiles = @(
     "CHANGELOG.md"
     "pkgmeta.yaml"
     "DESIGN.md"
+    "CURSEFORGE.md"
+    "DjinnisWarbandManagerDB.lua"
+    ".gitattributes"
 )
 $ExcludeFolders = @(
     ".git"
     ".github"
     ".claude"
     ".agents"
+    "docs"
     "releases"
 )
 
