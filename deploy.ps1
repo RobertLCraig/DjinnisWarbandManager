@@ -7,30 +7,45 @@ param(
 
 $DestPath = Join-Path $Destination $AddonName
 
-# Exclusions - files and folders that should NOT be deployed to the game client
-$ExcludeFiles = @(
-    ".gitignore"
-    "CLAUDE.md"
-    "README.md"
-    "LICENSE"
-    "deploy.ps1"
-    "release.ps1"
-    "RELEASE_NOTES.md"
-    "CHANGELOG.md"
-    "pkgmeta.yaml"
-    "DESIGN.md"
-    "CURSEFORGE.md"
-    "DjinnisWarbandManagerDB.lua"
-    ".gitattributes"
-)
-$ExcludeFolders = @(
-    ".git"
-    ".github"
-    ".claude"
-    ".agents"
-    "docs"
-    "releases"
-)
+# Exclusions come from pkgmeta.yaml's `ignore:` block, which is the single source of
+# truth shared with release.ps1 and the CurseForge packager. This script used to keep
+# its own copy; the copies drifted, and files that ship to users stopped matching the
+# files that reach the game folder. Edit pkgmeta.yaml, not this.
+function Get-PkgmetaIgnore {
+    param([string]$PkgmetaPath)
+
+    if (-not (Test-Path $PkgmetaPath)) {
+        throw "pkgmeta.yaml not found at '$PkgmetaPath'. It owns the exclusion list, so deploying without it would copy docs, tooling and git internals into the game folder. Refusing."
+    }
+
+    $ignore  = @()
+    $inBlock = $false
+    foreach ($line in (Get-Content $PkgmetaPath)) {
+        if ($line -match '^ignore:\s*$')      { $inBlock = $true;  continue }
+        if ($inBlock -and $line -match '^\S') { $inBlock = $false }
+        if ($inBlock -and $line -match '^\s+-\s+(.+?)\s*$') { $ignore += $Matches[1] }
+    }
+
+    if ($ignore.Count -eq 0) {
+        throw "pkgmeta.yaml has no entries under 'ignore:'. Refusing to deploy rather than copying every file in the repo."
+    }
+    return $ignore
+}
+
+# A path is excluded if it equals an entry or sits underneath one. Compared with
+# forward slashes so the YAML entries read the same on either side.
+function Test-Excluded {
+    param([string]$RelPath, [string[]]$Ignore)
+
+    $rel = $RelPath -replace '\\', '/'
+    foreach ($ex in $Ignore) {
+        $e = ($ex -replace '\\', '/').TrimEnd('/')
+        if ($rel -eq $e -or $rel.StartsWith("$e/", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+$Exclusions = Get-PkgmetaIgnore (Join-Path $Source "pkgmeta.yaml")
 
 function Write-Info($msg)    { Write-Host $msg -ForegroundColor Cyan }
 function Write-Success($msg) { Write-Host $msg -ForegroundColor Green }
@@ -56,21 +71,16 @@ if (-not (Test-Path $DestPath)) {
 # Collect source files (respecting exclusions)
 $allFiles = Get-ChildItem -Path $Source -Recurse -File
 $sourceFiles = @()
+# Every relative path that belongs in the game folder. The mirror step below deletes
+# by absence from this set, so excluding a file here is what removes an already-
+# deployed copy of it.
+$deployable = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 foreach ($f in $allFiles) {
     $rel = $f.FullName.Substring($Source.Length).TrimStart('\', '/')
-    $skip = $false
-
-    foreach ($ex in $ExcludeFiles) {
-        if ($rel -eq $ex) { $skip = $true; break }
+    if (-not (Test-Excluded $rel $Exclusions)) {
+        $sourceFiles += $f
+        [void]$deployable.Add(($rel -replace '\\', '/'))
     }
-    if (-not $skip) {
-        foreach ($ex in $ExcludeFolders) {
-            if ($rel -like "$ex\*" -or $rel -like "$ex/*" -or $rel -eq $ex) {
-                $skip = $true; break
-            }
-        }
-    }
-    if (-not $skip) { $sourceFiles += $f }
 }
 
 $newCount     = 0
@@ -104,14 +114,17 @@ foreach ($file in $sourceFiles) {
     }
 }
 
-# Remove files in destination that no longer exist in source (mirror behavior)
+# Remove destination files that are not in the deployable set (mirror behavior).
+# Tested against the set rather than against the source tree: a newly excluded file
+# still exists in source, so an existence check would leave every copy already in the
+# game folder behind for good. This is scoped to this addon's own directory and never
+# touches the AddOns root.
 $removedCount = 0
 if (Test-Path $DestPath) {
     $destFiles = Get-ChildItem -Path $DestPath -Recurse -File
     foreach ($df in $destFiles) {
-        $rel     = $df.FullName.Substring($DestPath.Length).TrimStart('\', '/')
-        $srcFile = Join-Path $Source $rel
-        if (-not (Test-Path $srcFile)) {
+        $rel = $df.FullName.Substring($DestPath.Length).TrimStart('\', '/')
+        if (-not $deployable.Contains(($rel -replace '\\', '/'))) {
             if (-not $DryRun) {
                 Remove-Item $df.FullName -Force
             }

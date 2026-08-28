@@ -192,22 +192,45 @@ if (-not $DryRun) {
 # 6. Build the local zip (for local testing; CurseForge builds its own from git)
 # ---------------------------------------------------------------------------
 
-$ExcludeNames = @(
-    ".git"
-    ".github"
-    ".gitignore"
-    ".claude"
-    "CLAUDE.md"
-    "CHANGELOG.md"
-    "LICENSE"
-    "README.md"
-    "deploy.ps1"
-    "release.ps1"
-    "RELEASE_NOTES.md"
-    "pkgmeta.yaml"
-    "DESIGN.md"
-    "releases"
-)
+# Exclusions come from pkgmeta.yaml's `ignore:` block, the same list the CurseForge
+# packager and deploy.ps1 read, so this zip and the one users download from CurseForge
+# hold the same files. This script used to keep its own copy and the two diverged.
+# Edit pkgmeta.yaml, not this.
+function Get-PkgmetaIgnore {
+    param([string]$PkgmetaPath)
+
+    if (-not (Test-Path $PkgmetaPath)) {
+        throw "pkgmeta.yaml not found at '$PkgmetaPath'. It owns the exclusion list, so building without it would ship docs, tooling and git internals to users. Refusing."
+    }
+
+    $ignore  = @()
+    $inBlock = $false
+    foreach ($line in (Get-Content $PkgmetaPath)) {
+        if ($line -match '^ignore:\s*$')      { $inBlock = $true;  continue }
+        if ($inBlock -and $line -match '^\S') { $inBlock = $false }
+        if ($inBlock -and $line -match '^\s+-\s+(.+?)\s*$') { $ignore += $Matches[1] }
+    }
+
+    if ($ignore.Count -eq 0) {
+        throw "pkgmeta.yaml has no entries under 'ignore:'. Refusing to build rather than shipping every file in the repo."
+    }
+    return $ignore
+}
+
+# A path is excluded if it equals an entry or sits underneath one. Compared with
+# forward slashes so the YAML entries read the same on either side.
+function Test-Excluded {
+    param([string]$RelPath, [string[]]$Ignore)
+
+    $rel = $RelPath -replace '\\', '/'
+    foreach ($ex in $Ignore) {
+        $e = ($ex -replace '\\', '/').TrimEnd('/')
+        if ($rel -eq $e -or $rel.StartsWith("$e/", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+$ExcludeNames = Get-PkgmetaIgnore (Join-Path $Root "pkgmeta.yaml")
 
 $ZipName = "DjinnisWarbandManager-$Tag.zip"
 $ZipPath = Join-Path $OutputDir $ZipName
@@ -223,11 +246,7 @@ $allItems   = Get-ChildItem -Path $Root -Recurse
 $filesToZip = $allItems | Where-Object {
     if ($_.PSIsContainer) { return $false }
     $rel = $_.FullName.Substring($Root.Length).TrimStart('\','/')
-    foreach ($ex in $ExcludeNames) {
-        $pattern = "^" + [regex]::Escape($ex) + "(/|\\|$)"
-        if ($rel -eq $ex -or $rel -match $pattern) { return $false }
-    }
-    return $true
+    return -not (Test-Excluded $rel $ExcludeNames)
 }
 
 if ($DryRun) {

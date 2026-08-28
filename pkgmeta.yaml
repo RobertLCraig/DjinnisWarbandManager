@@ -4,8 +4,10 @@ enable-nolib-creation: no
 ignore:
   - .git
   - .gitignore
+  - .gitattributes
   - .github
   - .claude
+  - .agents
   - CLAUDE.md
   - CHANGELOG.md
   - README.md
@@ -14,8 +16,11 @@ ignore:
   - release.ps1
   - RELEASE_NOTES.md
   - pkgmeta.yaml
+  - CURSEFORGE.md
   - DESIGN.md
+  - docs
   - releases
+  - DjinnisWarbandManagerDB.lua
 
 manual-changelog:
   filename: CHANGELOG.md
