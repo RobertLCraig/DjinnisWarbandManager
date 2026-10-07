@@ -142,7 +142,8 @@ function DWM:GetOnCharacterCount(id)
     for bag = 0, 5 do
         for _, e in pairs(world.bags[bag]) do if e.id == id then n = n + e.count end end
     end
-    return n
+    -- Like C_Item.GetItemCount: worn gear and equipped bags count too.
+    return n + ((world.worn or {})[id] or 0)
 end
 
 local function loadModule(path)
@@ -332,6 +333,21 @@ do
     ns.ItemEngine.session = nil
 end
 ns.guildBankOpen = false
+
+-- 11b. A worn copy (or an equipped bag) is not in the plan, and a bound bag copy is not either.
+reset(); freshDB()
+world.worn = { [200] = 1 }
+put(world.bags[0], 300, 1)
+do
+    local p = planOf("guild")
+    check("worn: worn copy is never a deposit", p[200] == nil)
+end
+put(world.bags[0], 200, 1, { bound = true })
+do
+    local p = planOf("guild")
+    check("bound: bound bag copy is never a deposit", p[200] == nil)
+end
+world.worn = nil
 
 -- 12. The server drops a guild move: the engine re-sends it instead of giving up, and after a
 -- confirmed move it waits GUILD_GAP before the next one.

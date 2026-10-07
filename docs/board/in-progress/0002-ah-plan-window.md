@@ -53,3 +53,8 @@ so the settle gate waited for a change that never came. Now: 0.8 s between confi
 a dropped move is re-sent (up to 3 times, only when no bag slot is locked, so an in-flight move is
 never doubled), and a locked stack is a wait, not a dead end. Not proven in game; if it still
 stalls, `/dwm debug` output from one stall is the next thing to read.
+
+**2026-10-07** Third test: 42 moves in one click, so the pacing works. Two deposits remained and
+could not be found in the bags: a Weavercloth Alchemist's Robe and a Dawnweave Reagent Bag, most
+likely worn and equipped. `GetItemCount` counts worn gear and equipped bags. AH plan items now
+count bag copies only, and a deposit is limited to bag copies that are not bound.

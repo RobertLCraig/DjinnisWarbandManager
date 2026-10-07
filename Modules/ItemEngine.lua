@@ -137,6 +137,30 @@ function ItemEngine:ScanWarband()
     return out
 end
 
+-- One pass over the bags for the AH plan: { [itemID] = copies in bags } and
+-- { [itemID] = copies that may go into bankType }. GetItemCount also counts
+-- worn gear and equipped bags, which no move can reach (seen in game
+-- 2026-10-07: a worn robe and an equipped reagent bag planned as deposits).
+local function BagCounts(bankType)
+    local inBags, movable = {}, {}
+    for _, bag in ipairs(PlayerBags()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, slot)
+            if id then
+                local info = SlotInfo(bag, slot)
+                local n = (info and info.stackCount) or 0
+                inBags[id] = (inBags[id] or 0) + n
+                -- Locked is in flight, not unmovable: count it as movable.
+                local probe = info and { quality = info.quality, isLocked = false }
+                if probe and DepositEligible(bag, slot, probe, bankType) then
+                    movable[id] = (movable[id] or 0) + n
+                end
+            end
+        end
+    end
+    return inBags, movable
+end
+
 -- First non-locked player stack of itemID: bag, slot, count.
 local function FindPlayerStack(itemID, bankType)
     for _, bag in ipairs(PlayerBags()) do
@@ -343,12 +367,17 @@ function ItemEngine:BuildPlan(kind)
     -- One bank scan for the whole plan. The AH plan can carry hundreds of
     -- targets, and a per-item count would rescan every tab for each one.
     local bankCounts = (kind == "guild") and ScanGuild() or self:ScanWarband()
+    local bagHave, bagMovable = BagCounts((kind == "guild") and BANKTYPE_GUILD or BANKTYPE_ACCOUNT)
 
     for _, id in ipairs(ids) do
         local spec = targets[id]
         local qty  = spec.qty or 0
         local md   = spec.mode or "keepmin"
-        local have = DWM:GetOnCharacterCount(id)
+        -- AH plan items: only bag copies count. The plan was built from bags,
+        -- banks and auctions, never from worn gear, and only a bag copy that
+        -- is not bound can be deposited.
+        local have = spec.ah and (bagHave[id] or 0) or DWM:GetOnCharacterCount(id)
+        local canMove = spec.ah and (bagMovable[id] or 0) or have
         local wb   = bankCounts[id] or 0
         -- Copies posted or in the mail (AH plan only) count as held, but only
         -- bag copies can actually be deposited.
@@ -357,12 +386,12 @@ function ItemEngine:BuildPlan(kind)
 
         local dir, amount
         if md == "depositall" then
-            if dep and have > 0 then dir, amount = "deposit", have end
+            if dep and canMove > 0 then dir, amount = "deposit", canMove end
         elseif md == "keepmin" then
-            if dep and held > qty then dir, amount = "deposit", math.min(have, held - qty) end
+            if dep and held > qty then dir, amount = "deposit", math.min(canMove, held - qty) end
         else -- exact
             if held > qty then
-                if dep then dir, amount = "deposit", math.min(have, held - qty) end
+                if dep then dir, amount = "deposit", math.min(canMove, held - qty) end
             elseif held < qty and canWd then
                 dir, amount = "withdraw", math.min(qty - held, wb)
             end
