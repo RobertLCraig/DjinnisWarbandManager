@@ -40,3 +40,9 @@ visit moves nothing while unconfirmed and that the button path does. The window 
 offline check; it uses only Blizzard templates checked against `wow-ui-source` 12.1
 (BasicFrameTemplateWithInset, WowScrollBoxList, MinimalScrollBar, UICheckButtonTemplate,
 EditModeSystemSelectionTemplate, MenuUtil.CreateContextMenu).
+
+**2026-10-07** Rob's first in-game test: the window showed the right 16 moves, but Move items made
+0 moves ("no further progress"). Cause: `C_Bank.IsItemAllowedInBankType(Enum.BankType.Guild, loc)`
+answers false for every item; Blizzard only calls it for the character and warband banks. The
+guild bank test is now `C_Item.IsBound`. The test fake now behaves like the live client, and 6
+checks fail on the old code.
