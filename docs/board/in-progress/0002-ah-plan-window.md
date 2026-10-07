@@ -46,3 +46,10 @@ EditModeSystemSelectionTemplate, MenuUtil.CreateContextMenu).
 answers false for every item; Blizzard only calls it for the character and warband banks. The
 guild bank test is now `C_Item.IsBound`. The test fake now behaves like the live client, and 6
 checks fail on the old code.
+
+**2026-10-07** Second test: 2 to 4 moves per click, then "no further progress". Best reading: the
+guild bank server takes one move at a time and drops a request sent while the last is in flight,
+so the settle gate waited for a change that never came. Now: 0.8 s between confirmed guild moves,
+a dropped move is re-sent (up to 3 times, only when no bag slot is locked, so an in-flight move is
+never doubled), and a locked stack is a wait, not a dead end. Not proven in game; if it still
+stalls, `/dwm debug` output from one stall is the next thing to read.

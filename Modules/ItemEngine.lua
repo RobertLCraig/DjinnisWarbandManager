@@ -34,6 +34,12 @@ local REAGENT_BAG = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or 5
 local ITER_CAP = 400        -- hard ceiling on physical moves per pass (an AH plan pass can be ~300)
 local WATCHDOG = 2.0        -- failsafe only; real pacing is event-driven
 local MAX_WAIT = 8          -- settle ticks with no count change -> give up
+-- Guild bank pacing (card 0002). The server handles one guild bank move at a
+-- time and silently drops a request that arrives while the last one is still
+-- in flight (seen in game 2026-10-07: 2 to 4 moves per click, then stuck).
+local GUILD_GAP = 0.8       -- seconds between confirmed guild moves
+local GUILD_RETRY_WAIT = 3  -- settle ticks before re-sending a dropped guild move
+local GUILD_RETRIES = 3     -- re-sends of one move before giving up
 
 --============================================================================
 -- Inventory helpers
@@ -207,6 +213,18 @@ end
 local function CursorBusy()
     local kind = GetCursorInfo()
     return kind ~= nil
+end
+
+-- Any bag slot locked? The client locks a slot while a move from it is in
+-- flight, and unlocks it when the server answers either way.
+local function BagsLocked()
+    for _, bag in ipairs(PlayerBags()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local info = SlotInfo(bag, slot)
+            if info and info.isLocked then return true end
+        end
+    end
+    return false
 end
 
 --============================================================================
@@ -646,14 +664,41 @@ function ItemEngine:_Step()
     if s.awaiting then
         if CountSig() == s.preSig then
             s.waitTicks = (s.waitTicks or 0) + 1
-            if s.waitTicks > MAX_WAIT then
+            -- Guild bank: a dropped move leaves nothing locked in the bags, so
+            -- sending it again cannot double-move. A move still in flight
+            -- keeps its bag slot locked, and then we only wait.
+            if s.kind == "guild" and s.waitTicks > GUILD_RETRY_WAIT
+               and (s.retries or 0) < GUILD_RETRIES and not BagsLocked() then
+                s.retries = (s.retries or 0) + 1
+                s.moves = s.moves - 1     -- the re-send below counts it again
+                DWM:Debug("_Step: guild move dropped, re-sending (" .. s.retries .. ")")
+                s.awaiting = false
+                s.waitTicks = 0
+            elseif s.waitTicks > MAX_WAIT then
                 if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
                 return self:_Finish("stuck")
+            else
+                return self:_Arm()       -- still in transit; keep waiting
             end
-            return self:_Arm()           -- still in transit; keep waiting
+        else
+            s.awaiting = false           -- prior move confirmed
+            s.waitTicks = 0
+            s.retries = 0
+            s.lastConfirmed = GetTime()
         end
-        s.awaiting = false               -- prior move confirmed
-        s.waitTicks = 0
+    end
+
+    -- Guild bank: leave the server a moment after each confirmed move.
+    if s.kind == "guild" and s.lastConfirmed then
+        local left = GUILD_GAP - (GetTime() - s.lastConfirmed)
+        if left > 0 then
+            if self._wd then self:CancelTimer(self._wd) end
+            self._wd = self:ScheduleTimer(function()
+                self._wd = nil
+                if self.session then self:_Step() end
+            end, left)
+            return
+        end
     end
 
     s.iters = s.iters + 1
@@ -678,6 +723,13 @@ function ItemEngine:_Step()
     -- effect of exactly this move.
     s.preSig = CountSig()
     local issued = self:_DoOneMove(plan, s.kind)
+    -- Guild bank: a stack still locked by the last move cannot be picked yet.
+    -- That is a wait, not a dead end.
+    if not issued and s.kind == "guild" and BagsLocked() and (s.lockWaits or 0) < MAX_WAIT then
+        s.lockWaits = (s.lockWaits or 0) + 1
+        return self:_Arm()
+    end
+    s.lockWaits = 0
     if not issued then
         if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
         return self:_Finish("blocked")

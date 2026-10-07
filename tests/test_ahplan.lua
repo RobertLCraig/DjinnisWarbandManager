@@ -82,6 +82,7 @@ _G.C_Item = {
     GetItemInfoInstant = function(link) return tonumber(link:match("item:(%d+)")) end,
     IsBound = function(loc) return loc.bound and true or false end,
 }
+_G.GetTime = function() return world.now or 0 end
 _G.GetCursorInfo = function() return nil end
 _G.ClearCursor = function() end
 
@@ -329,6 +330,39 @@ do
     for _, c in ipairs(world.calls) do if c.name == "UseContainerItem" then moved = true end end
     check("panel: Move items button moves the item", moved)
     ns.ItemEngine.session = nil
+end
+ns.guildBankOpen = false
+
+-- 12. The server drops a guild move: the engine re-sends it instead of giving up, and after a
+-- confirmed move it waits GUILD_GAP before the next one.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+ns.guildBankOpen = true
+world.now = 100
+put(world.bags[1], 200, 1)                -- What's item: deposit
+put(world.bags[2], 100, 1); put(world.bags[3], 100, 1)   -- Buyme keeps 1: deposit 1
+do
+    local E = ns.ItemEngine
+    local function uses()
+        local n = 0
+        for _, c in ipairs(world.calls) do if c.name == "UseContainerItem" then n = n + 1 end end
+        return n
+    end
+    E:Run("panel", "guild")
+    check("pacing: first move sent", uses() == 1)
+    for _ = 1, 4 do E:_Step() end          -- nothing changed: the server dropped it
+    check("retry: dropped move is sent again", uses() == 2, "uses=" .. uses())
+    check("retry: session still running", E.session ~= nil)
+    local last = world.calls[#world.calls]  -- now the server accepts it
+    world.bags[last[1]][last[2]] = nil
+    E:_Step()
+    check("gap: no move straight after a confirmed one", uses() == 2, "uses=" .. uses())
+    world.now = world.now + 1
+    E:_Step()
+    check("gap: next move after the pause", uses() == 3, "uses=" .. uses())
+    check("moves counted once each", E.session and E.session.moves == 2,
+        "moves=" .. tostring(E.session and E.session.moves))
+    E.session = nil
 end
 ns.guildBankOpen = false
 
