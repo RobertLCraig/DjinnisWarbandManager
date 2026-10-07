@@ -64,17 +64,23 @@ _G.C_Container = {
 }
 _G.C_Bank = {
     FetchPurchasedBankTabIDs = function() return { WB_TAB } end,
-    IsItemAllowedInBankType = function(_, loc) return not loc.bound end,
+    -- As the live client behaves (2026-10-07): "no" for EVERY item with the
+    -- guild bank type, so the engine must not ask it about the guild bank.
+    IsItemAllowedInBankType = function(bankType, loc)
+        if bankType == Enum.BankType.Guild then return false end
+        return not loc.bound
+    end,
 }
 _G.ItemLocation = {
     CreateFromBagAndSlot = function(_, bag, slot)
         local e = container(bag)[slot]
-        return { bound = e and e.bound }
+        return { bound = e and e.bound, IsValid = function() return e ~= nil end }
     end,
 }
 _G.C_Item = {
     GetItemInfo = function(id) return "item" .. id, nil, nil, nil, nil, nil, nil, 1 end,
     GetItemInfoInstant = function(link) return tonumber(link:match("item:(%d+)")) end,
+    IsBound = function(loc) return loc.bound and true or false end,
 }
 _G.GetCursorInfo = function() return nil end
 _G.ClearCursor = function() end

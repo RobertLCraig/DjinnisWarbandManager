@@ -80,6 +80,17 @@ local BANKTYPE_GUILD = (Enum and Enum.BankType and Enum.BankType.Guild) or 1
 local function DepositEligible(bag, slot, info, bankType)
     if not info or info.isLocked then return false end
     if info.quality == 0 then return false end                  -- poor (S13.10)
+    -- Guild bank: C_Bank.IsItemAllowedInBankType answers "no" for every item
+    -- with BankType.Guild (seen in game 2026-10-07: 16 planned deposits, 0
+    -- moves), and Blizzard only ever calls it for the character and warband
+    -- banks. A guild bank takes anything that is not bound, so test that.
+    if bankType == BANKTYPE_GUILD then
+        if C_Item and C_Item.IsBound and ItemLocation then
+            local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+            if loc and loc:IsValid() and C_Item.IsBound(loc) then return false end
+        end
+        return true
+    end
     if C_Bank and C_Bank.IsItemAllowedInBankType and ItemLocation then
         local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
         if loc and not C_Bank.IsItemAllowedInBankType(bankType or BANKTYPE_ACCOUNT, loc) then
