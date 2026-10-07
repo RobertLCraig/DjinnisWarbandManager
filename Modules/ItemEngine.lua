@@ -31,7 +31,7 @@ ns.ItemEngine = ItemEngine
 local BANKTYPE_ACCOUNT = ns.BANKTYPE_ACCOUNT
 local REAGENT_BAG = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or 5
 
-local ITER_CAP = 100        -- hard ceiling on physical moves per pass
+local ITER_CAP = 400        -- hard ceiling on physical moves per pass (an AH plan pass can be ~300)
 local WATCHDOG = 2.0        -- failsafe only; real pacing is event-driven
 local MAX_WAIT = 8          -- settle ticks with no count change -> give up
 
@@ -73,13 +73,16 @@ local function ItemName(itemID)
     return n or ("item:" .. tostring(itemID))   -- S13.12: never block on data
 end
 
--- Eligible to deposit this physical slot into the warband bank?
-local function DepositEligible(bag, slot, info)
+local BANKTYPE_GUILD = (Enum and Enum.BankType and Enum.BankType.Guild) or 1
+
+-- Eligible to deposit this physical slot into the given bank (default the
+-- warband)? Soulbound and warbound copies fail here and are left alone.
+local function DepositEligible(bag, slot, info, bankType)
     if not info or info.isLocked then return false end
     if info.quality == 0 then return false end                  -- poor (S13.10)
     if C_Bank and C_Bank.IsItemAllowedInBankType and ItemLocation then
         local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
-        if loc and not C_Bank.IsItemAllowedInBankType(BANKTYPE_ACCOUNT, loc) then
+        if loc and not C_Bank.IsItemAllowedInBankType(bankType or BANKTYPE_ACCOUNT, loc) then
             return false
         end
     end
@@ -118,12 +121,12 @@ function ItemEngine:ScanWarband()
 end
 
 -- First non-locked player stack of itemID: bag, slot, count.
-local function FindPlayerStack(itemID)
+local function FindPlayerStack(itemID, bankType)
     for _, bag in ipairs(PlayerBags()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
             if C_Container.GetContainerItemID(bag, slot) == itemID then
                 local info = SlotInfo(bag, slot)
-                if info and not info.isLocked and DepositEligible(bag, slot, info) then
+                if info and not info.isLocked and DepositEligible(bag, slot, info, bankType) then
                     return bag, slot, info.stackCount or 0
                 end
             end
@@ -196,45 +199,143 @@ local function CursorBusy()
 end
 
 --============================================================================
+-- Guild bank helpers (card 0001: AH plan transport only)
+--
+-- Checked against wow-ui-source 12.1.0 Blizzard_GuildBankUI: contents are
+-- only readable after QueryGuildBankTab(tab); a bag item deposits by being
+-- picked up and dropped on a guild slot; AutoStoreGuildBankItem(tab, slot)
+-- withdraws a whole stack into the bags; SplitGuildBankItem takes part of one.
+-- GetGuildBankTabInfo's remainingWithdrawals is -1 for unlimited.
+--============================================================================
+
+local GB_SLOTS = 98   -- MAX_GUILDBANK_SLOTS_PER_TAB, local to Blizzard's file
+
+-- { { tab, canDeposit, canWithdraw } } for every tab this character can see.
+local function GuildTabs()
+    local t = {}
+    for tab = 1, (GetNumGuildBankTabs() or 0) do
+        local _, _, isViewable, canDeposit, _, remaining = GetGuildBankTabInfo(tab)
+        if isViewable then
+            t[#t + 1] = { tab = tab, canDeposit = canDeposit,
+                          canWithdraw = (remaining == nil) or remaining ~= 0 }
+        end
+    end
+    return t
+end
+
+local function GuildItemID(tab, slot)
+    local link = GetGuildBankItemLink(tab, slot)
+    if not link then return nil end
+    return (C_Item.GetItemInfoInstant(link))
+end
+
+-- One pass over the visible guild tabs -> { [itemID] = totalCount }.
+local function ScanGuild()
+    local out = {}
+    for _, t in ipairs(GuildTabs()) do
+        for slot = 1, GB_SLOTS do
+            local id = GuildItemID(t.tab, slot)
+            if id then
+                local _, count = GetGuildBankItemInfo(t.tab, slot)
+                out[id] = (out[id] or 0) + (count or 0)
+            end
+        end
+    end
+    return out
+end
+
+-- First unlocked guild stack of itemID on a tab we may withdraw from.
+local function FindGuildStack(itemID)
+    for _, t in ipairs(GuildTabs()) do
+        if t.canWithdraw then
+            for slot = 1, GB_SLOTS do
+                if GuildItemID(t.tab, slot) == itemID then
+                    local _, count, locked = GetGuildBankItemInfo(t.tab, slot)
+                    if not locked then return t.tab, slot, count or 0 end
+                end
+            end
+        end
+    end
+end
+
+-- First empty guild slot on a tab we may deposit into.
+local function FindEmptyGuildSlot()
+    for _, t in ipairs(GuildTabs()) do
+        if t.canDeposit then
+            for slot = 1, GB_SLOTS do
+                if not GetGuildBankItemLink(t.tab, slot) then return t.tab, slot end
+            end
+        end
+    end
+end
+
+local function GuildFreeSlots()
+    local n = 0
+    for _, t in ipairs(GuildTabs()) do
+        if t.canDeposit then
+            for slot = 1, GB_SLOTS do
+                if not GetGuildBankItemLink(t.tab, slot) then n = n + 1 end
+            end
+        end
+    end
+    return n
+end
+
+--============================================================================
 -- Plan (pure) - used by simulate (S13.8) and by the executor
 --============================================================================
 
--- Returns sorted list of { itemID, dir, amount, have, wb, qty, mode } and a
--- list of human-readable capacity warnings.
-function ItemEngine:BuildPlan()
+-- kind: "warband" (default) | "guild". Returns sorted list of
+-- { itemID, dir, amount, have, wb, qty, mode } and a list of capacity
+-- warnings. `wb` is the count in whichever bank `kind` names.
+--
+-- The AH plan (spec.ah) deposits into the GUILD bank only, so the warband
+-- stays Rob's storage; it withdraws from either. Purpose targets never touch
+-- the guild bank.
+function ItemEngine:BuildPlan(kind)
+    kind = kind or "warband"
     local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
     local mode = DWM.db.profile.mode or "both"
     local canDep = (mode == "deposit" or mode == "both")
     local canWd  = (mode == "withdraw" or mode == "both")
 
     local ids = {}
-    for id in pairs(targets) do ids[#ids + 1] = id end
+    for id, spec in pairs(targets) do
+        if kind == "warband" or spec.ah then ids[#ids + 1] = id end
+    end
     table.sort(ids)   -- deterministic order (S13.9)
 
-    DWM:Debug(("BuildPlan: %d target(s), mode=%s canDep=%s canWd=%s")
-        :format(#ids, tostring(mode), tostring(canDep), tostring(canWd)))
+    DWM:Debug(("BuildPlan[%s]: %d target(s), mode=%s canDep=%s canWd=%s")
+        :format(kind, #ids, tostring(mode), tostring(canDep), tostring(canWd)))
 
     local plan, warns = {}, {}
-    local wbFreeApprox  = FreeSlots(WarbandTabs())
-    local bagFreeApprox = FreeSlots(PlayerBags())
+    local bankFreeApprox = (kind == "guild") and GuildFreeSlots() or FreeSlots(WarbandTabs())
+    local bagFreeApprox  = FreeSlots(PlayerBags())
+    -- One bank scan for the whole plan. The AH plan can carry hundreds of
+    -- targets, and a per-item count would rescan every tab for each one.
+    local bankCounts = (kind == "guild") and ScanGuild() or self:ScanWarband()
 
     for _, id in ipairs(ids) do
         local spec = targets[id]
         local qty  = spec.qty or 0
         local md   = spec.mode or "keepmin"
         local have = DWM:GetOnCharacterCount(id)
-        local wb   = WarbandCount(id)
+        local wb   = bankCounts[id] or 0
+        -- Copies posted or in the mail (AH plan only) count as held, but only
+        -- bag copies can actually be deposited.
+        local held = have + (spec.pending or 0)
+        local dep  = canDep and not (spec.ah and kind == "warband")
 
         local dir, amount
         if md == "depositall" then
-            if canDep and have > 0 then dir, amount = "deposit", have end
+            if dep and have > 0 then dir, amount = "deposit", have end
         elseif md == "keepmin" then
-            if canDep and have > qty then dir, amount = "deposit", have - qty end
+            if dep and held > qty then dir, amount = "deposit", math.min(have, held - qty) end
         else -- exact
-            if have > qty and canDep then
-                dir, amount = "deposit", have - qty
-            elseif have < qty and canWd then
-                dir, amount = "withdraw", math.min(qty - have, wb)
+            if held > qty then
+                if dep then dir, amount = "deposit", math.min(have, held - qty) end
+            elseif held < qty and canWd then
+                dir, amount = "withdraw", math.min(qty - held, wb)
             end
         end
 
@@ -243,8 +344,9 @@ function ItemEngine:BuildPlan()
                 itemID = id, dir = dir, amount = amount,
                 have = have, wb = wb, qty = qty, mode = md,
             }
-            if dir == "deposit" and wbFreeApprox <= 0 then
-                warns[#warns + 1] = L["MSG_ITEM_NO_WB_SPACE"]:format(ItemName(id))
+            if dir == "deposit" and bankFreeApprox <= 0 then
+                warns[#warns + 1] = L[kind == "guild" and "MSG_ITEM_NO_GB_SPACE" or "MSG_ITEM_NO_WB_SPACE"]
+                    :format(ItemName(id))
             elseif dir == "withdraw" then
                 if wb <= 0 then
                     warns[#warns + 1] = L["MSG_ITEM_NONE_IN_WB"]:format(ItemName(id))
@@ -269,7 +371,9 @@ function ItemEngine:ResidualShortfalls()
     local out = {}
     for _, id in ipairs(ids) do
         local spec = targets[id]
-        if (spec.mode or "keepmin") == "exact" then
+        -- AH plan targets are not reported: a planned copy that sold or is
+        -- still on another character is expected, not a shortage.
+        if (spec.mode or "keepmin") == "exact" and not spec.ah then
             local qty  = spec.qty or 0
             local have = DWM:GetOnCharacterCount(id)
             if have < qty then
@@ -328,17 +432,23 @@ end
 -- actually consolidate anything is skipped (the reported over-eager sort).
 function ItemEngine:_WarbandNeedsTidy()
     local targets = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
-    for id in pairs(targets) do
-        local stacks, total = 0, 0
-        for _, bag in ipairs(WarbandTabs()) do
-            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-                if C_Container.GetContainerItemID(bag, slot) == id then
-                    local info = SlotInfo(bag, slot)
-                    local c = (info and info.stackCount) or 0
-                    if c > 0 then stacks = stacks + 1; total = total + c end
+    -- One pass over the warband, counting stacks per managed item.
+    local stacksOf, totalOf = {}, {}
+    for _, bag in ipairs(WarbandTabs()) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, slot)
+            if id and targets[id] then
+                local info = SlotInfo(bag, slot)
+                local c = (info and info.stackCount) or 0
+                if c > 0 then
+                    stacksOf[id] = (stacksOf[id] or 0) + 1
+                    totalOf[id] = (totalOf[id] or 0) + c
                 end
             end
         end
+    end
+    for id in pairs(targets) do
+        local stacks, total = stacksOf[id] or 0, totalOf[id] or 0
         if stacks >= 2 then
             local max = MaxStack(id)
             if max and max > 0 and stacks > math.ceil(total / max) then
@@ -362,7 +472,7 @@ function ItemEngine:_Finish(reason)
     -- item fragmented (>1 stack that could be combined). Note: this is the
     -- addon's C_Container.SortBank; the bank's own per-deposit category reflow
     -- is Blizzard and not controlled here.
-    if s.moves > 0 and C_Container and C_Container.SortBank then
+    if s.moves > 0 and s.kind ~= "guild" and C_Container and C_Container.SortBank then
         if not DWM.db.profile.sortAfterItems then
             DWM:Debug("sort: disabled (sortAfterItems=false) - not sorting")
         elseif self:_WarbandNeedsTidy() then
@@ -376,8 +486,9 @@ function ItemEngine:_Finish(reason)
         DWM:Print(L["MSG_ITEM_DONE"]:format(s.moves))
     end
     -- §14.5: after the pass, tell the user about anything still short because
-    -- the warband ran out - always, even on a silent bank-open run.
-    self:_ReportShortfalls()
+    -- the warband ran out - always, even on a silent bank-open run. Not at the
+    -- guild bank: the warband cannot be read there, so every count looks short.
+    if s.kind ~= "guild" then self:_ReportShortfalls() end
 end
 
 function ItemEngine:Abort(reason)
@@ -391,9 +502,67 @@ function ItemEngine:Abort(reason)
     if v then DWM:Print(L["MSG_ITEM_ABORTED"]) end
 end
 
+-- Guild bank version of _DoOneMove (card 0001). A whole stack deposits the way
+-- a right-click does (UseContainerItem with the guild bank open, as in
+-- ContainerFrame.lua): the SERVER picks the slot in the current tab, so a tab
+-- whose contents have not loaded yet can never cause a swap. Only a partial
+-- stack goes through the cursor onto a slot we believe is empty. Each move
+-- re-queries the tab it touched, because guild contents refresh on request.
+function ItemEngine:_DoOneGuildMove(plan)
+    for _, e in ipairs(plan) do
+        if e.dir == "deposit" then
+            local bag, slot, count = FindPlayerStack(e.itemID, BANKTYPE_GUILD)
+            local tab, gSlot = FindEmptyGuildSlot()
+            DWM:Debug(("_DoOneGuildMove deposit item:%d amount=%d bag=%s slot=%s -> tab=%s slot=%s")
+                :format(e.itemID, e.amount, tostring(bag), tostring(slot), tostring(tab), tostring(gSlot)))
+            if bag and tab then
+                if GetCurrentGuildBankTab() ~= tab then SetCurrentGuildBankTab(tab) end
+                if count <= e.amount then
+                    C_Container.UseContainerItem(bag, slot)
+                    QueryGuildBankTab(tab)
+                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_DEPOSIT"], count, ItemName(e.itemID)))
+                    return true
+                end
+                if CursorBusy() then DWM:Debug("_DoOneGuildMove: cursor busy, defer"); return false end
+                ClearCursor()
+                C_Container.SplitContainerItem(bag, slot, e.amount)
+                PickupGuildBankItem(tab, gSlot)
+                QueryGuildBankTab(tab)
+                DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_DEPOSIT"], e.amount, ItemName(e.itemID)))
+                return true
+            end
+        else -- withdraw
+            local tab, gSlot, count = FindGuildStack(e.itemID)
+            DWM:Debug(("_DoOneGuildMove withdraw item:%d amount=%d -> tab=%s slot=%s count=%s")
+                :format(e.itemID, e.amount, tostring(tab), tostring(gSlot), tostring(count)))
+            if tab then
+                if count <= e.amount then
+                    AutoStoreGuildBankItem(tab, gSlot)
+                    QueryGuildBankTab(tab)
+                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], count, ItemName(e.itemID)))
+                    return true
+                end
+                if CursorBusy() then DWM:Debug("_DoOneGuildMove: cursor busy, defer"); return false end
+                local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
+                if dBag then
+                    ClearCursor()
+                    SplitGuildBankItem(tab, gSlot, e.amount)
+                    C_Container.PickupContainerItem(dBag, dSlot)
+                    QueryGuildBankTab(tab)
+                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
+                    return true
+                end
+            end
+        end
+    end
+    DWM:Debug("_DoOneGuildMove: nothing actionable (no stack / no slot / no withdrawals left)")
+    return false
+end
+
 -- Issue exactly ONE physical move toward the first actionable plan entry.
 -- Returns true if a move was issued (caller then waits for the bank to settle).
-function ItemEngine:_DoOneMove(plan)
+function ItemEngine:_DoOneMove(plan, kind)
+    if kind == "guild" then return self:_DoOneGuildMove(plan) end
     for _, e in ipairs(plan) do
         if e.dir == "deposit" then
             local bag, slot, count = FindPlayerStack(e.itemID)
@@ -451,7 +620,11 @@ end
 function ItemEngine:_Step()
     local s = self.session
     if not s then return end
-    if not DWM:IsWarbandUsable() then return self:Abort("warband-gone") end
+    if s.kind == "guild" then
+        if not ns.guildBankOpen then return self:Abort("guild-bank-gone") end
+    elseif not DWM:IsWarbandUsable() then
+        return self:Abort("warband-gone")
+    end
 
     -- SETTLE GATE: never issue the next move until the previous one is
     -- actually reflected in live counts. Warband transfers are server-
@@ -473,7 +646,7 @@ function ItemEngine:_Step()
     s.iters = s.iters + 1
     if s.iters > ITER_CAP then return self:_Finish("cap") end
 
-    local plan = self:BuildPlan()
+    local plan = self:BuildPlan(s.kind)
     if #plan == 0 then return self:_Finish("done") end
 
     if CursorBusy() then
@@ -491,7 +664,7 @@ function ItemEngine:_Step()
     -- Snapshot live counts BEFORE issuing so the settle gate can detect the
     -- effect of exactly this move.
     s.preSig = CountSig()
-    local issued = self:_DoOneMove(plan)
+    local issued = self:_DoOneMove(plan, s.kind)
     if not issued then
         if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
         return self:_Finish("blocked")
@@ -524,7 +697,9 @@ end
 --============================================================================
 
 -- reason: "bank-open" (quiet when nothing to do) | "manual" (verbose)
-function ItemEngine:Run(reason)
+-- kind:   "warband" | "guild"; nil means the guild bank if it is open.
+function ItemEngine:Run(reason, kind)
+    kind = kind or (ns.guildBankOpen and "guild" or "warband")
     if self.session then
         DWM:Debug("ItemEngine:Run skipped - a session is already in progress")
         return
@@ -548,7 +723,13 @@ function ItemEngine:Run(reason)
         if not DWM.db.profile.enabled then return end
         if ns.sessionPaused then return end
     end
-    if not DWM:IsWarbandUsable() then
+    if kind == "guild" then
+        if not (ns.guildBankOpen and ns.AHPlan and ns.AHPlan:CanUseGuildBank()) then
+            DWM:Debug("Run: bail - guild bank not open, or not the AH plan's transport guild")
+            if verbose then DWM:Print(L["MSG_AHPLAN_NOGUILD"]) end
+            return
+        end
+    elseif not DWM:IsWarbandUsable() then
         DWM:Debug("Run: bail - IsWarbandUsable() false")
         if verbose then DWM:Print(L["MSG_NO_WARBAND"]) end
         return
@@ -560,7 +741,7 @@ function ItemEngine:Run(reason)
         return
     end
 
-    local plan, warns = self:BuildPlan()
+    local plan, warns = self:BuildPlan(kind)
     DWM:Debug("Run: BuildPlan -> " .. #plan .. " entr" .. (#plan == 1 and "y" or "ies"))
     for _, e in ipairs(plan) do
         DWM:Debug(("  plan: %s %d x item:%d (have %d, wb %d, qty %d, mode %s)")
@@ -573,13 +754,30 @@ function ItemEngine:Run(reason)
         forcedSim = true
         DWM:Print(L["MSG_ITEM_FIRSTRUN"])
     end
+    -- The AH plan (card 0001) has its own opt-in: it can move hundreds of
+    -- items that no purpose ever touched, so it dry-runs until confirmed.
+    if not forcedSim and not simulate and not DWM.db.profile.ahPlanConfirmed then
+        local targets = ns.Purposes:ResolveItemsForCurrent()
+        for _, e in ipairs(plan) do
+            if targets[e.itemID] and targets[e.itemID].ah then
+                forcedSim = true
+                DWM:Print(L["MSG_AHPLAN_FIRSTRUN"])
+                break
+            end
+        end
+    end
 
     if simulate or forcedSim then
         if #plan == 0 then
             if verbose or forcedSim then DWM:Print(L["MSG_ITEM_SIM_NOTHING"]) end
         else
             DWM:Print(L["MSG_ITEM_SIM_HEADER"])
-            for _, e in ipairs(plan) do
+            local SIM_LINES = 40   -- an AH plan run can list hundreds; chat cannot
+            for i, e in ipairs(plan) do
+                if i > SIM_LINES then
+                    DWM:Print("  " .. L["MSG_ITEM_SIM_MORE"]:format(#plan - SIM_LINES))
+                    break
+                end
                 local verb = (e.dir == "deposit") and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"]
                 DWM:Print(("  %s %d x %s  (have %d -> %d)"):format(
                     verb, e.amount, ItemName(e.itemID), e.have,
@@ -589,7 +787,7 @@ function ItemEngine:Run(reason)
         end
         -- §14.5: quantified shortage prediction in the dry-run, even when the
         -- plan is empty (nothing to do, yet still short because warband=0).
-        self:_ReportShortfalls()
+        if kind ~= "guild" then self:_ReportShortfalls() end
         return
     end
 
@@ -600,12 +798,12 @@ function ItemEngine:Run(reason)
 
     DWM:Debug("Run: starting session")
     self.session = {
-        iters = 0, moves = 0, verbose = verbose,
+        iters = 0, moves = 0, verbose = verbose, kind = kind,
         awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,
     }
     if not self._bucket then
         self._bucket = self:RegisterBucketEvent(
-            { "BAG_UPDATE_DELAYED", "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED" },
+            { "BAG_UPDATE_DELAYED", "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED", "GUILDBANKBAGSLOTS_CHANGED" },
             0.3, "_OnBankChanged")
     end
     self:_Step()

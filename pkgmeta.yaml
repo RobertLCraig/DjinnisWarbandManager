@@ -19,6 +19,8 @@ ignore:
   - CURSEFORGE.md
   - DESIGN.md
   - docs
+  - tools
+  - tests
   - releases
   - DjinnisWarbandManagerDB.lua
 

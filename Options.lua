@@ -167,10 +167,17 @@ end
 
 local function PrintItems()
     local t = ns.Purposes and ns.Purposes:ResolveItemsForCurrent() or {}
-    local ids = {}
-    for id in pairs(t) do ids[#ids + 1] = id end
+    local ids, nPlan = {}, 0
+    for id, s in pairs(t) do
+        -- AH plan items can number in the hundreds; count them, do not list them.
+        if s.ah then nPlan = nPlan + 1 else ids[#ids + 1] = id end
+    end
     table.sort(ids)
-    if #ids == 0 then DWM:Print(L["MSG_ITEMS_LIST_EMPTY"]); return end
+    if nPlan > 0 then DWM:Print(L["MSG_ITEMS_LIST_AHPLAN"]:format(nPlan)) end
+    if #ids == 0 then
+        if nPlan == 0 then DWM:Print(L["MSG_ITEMS_LIST_EMPTY"]) end
+        return
+    end
     DWM:Print(L["MSG_ITEMS_LIST_HEADER"])
     for _, id in ipairs(ids) do
         local s = t[id]
@@ -696,6 +703,31 @@ local options = {
             get = function() return P().sortAfterItems end,
             set = function(_, v) P().sortAfterItems = v end,
         },
+        hdr_ahplan = { type = "header", order = 28.1, name = L["OPT_AHPLAN"] },
+        ahplan = {
+            type = "toggle", order = 28.2,
+            name = L["OPT_AHPLAN_NAME"], desc = L["OPT_AHPLAN_DESC"],
+            get = function() return P().ahPlanEnabled end,
+            set = function(_, v)
+                P().ahPlanEnabled = v
+                DWM:Print(L["MSG_AHPLAN_TOGGLED"]:format(v and L["ON"] or L["OFF"]))
+            end,
+        },
+        ahplanconfirm = {
+            type = "execute", order = 28.3,
+            name = L["OPT_AHPLANCONFIRM_NAME"], desc = L["OPT_AHPLANCONFIRM_DESC"],
+            confirm = true, confirmText = L["OPT_AHPLANCONFIRM_DESC"],
+            disabled = function() return P().ahPlanConfirmed end,
+            func = function()
+                P().ahPlanConfirmed = true
+                DWM:Print(L["MSG_AHPLAN_CONFIRMED"])
+            end,
+        },
+        ahplanstatus = {
+            type = "execute", order = 28.4,
+            name = L["OPT_AHPLANSTATUS_NAME"], desc = L["OPT_AHPLANSTATUS_DESC"],
+            func = function() if ns.AHPlan then ns.AHPlan:PrintStatus() end end,
+        },
         logtab = { type = "group", order = 29, name = L["OPT_LOG"], args = {} },
         log = {
             type = "execute", order = 34,
@@ -946,6 +978,7 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
             DWM:Print(L["CMD_HELP_ITEMLIST"]); DWM:Print(L["CMD_HELP_LOG"])
             DWM:Print(L["CMD_HELP_LEDGER"]); DWM:Print(L["CMD_HELP_PURPOSEITEMPROF"])
+            DWM:Print(L["CMD_HELP_AHPLAN"])
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end

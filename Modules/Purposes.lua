@@ -217,9 +217,15 @@ function Purposes:ResolveItemsFor(rec)
     return out
 end
 
--- Thin wrapper: targets for the current character (unchanged callers).
+-- Targets for the current character: purpose + overrides, then the AH plan
+-- (card 0001) on top. The plan wins for the items it covers, because it was
+-- built from every character's stock and a purpose target cannot see that.
 function Purposes:ResolveItemsForCurrent()
-    return self:ResolveItemsFor(ns.Roster and ns.Roster:Current())
+    local out = self:ResolveItemsFor(ns.Roster and ns.Roster:Current())
+    if ns.AHPlan then
+        for id, spec in pairs(ns.AHPlan:TargetsForCurrent()) do out[id] = spec end
+    end
+    return out
 end
 
 -- Every itemID referenced by any purpose or any character override (§14.2).

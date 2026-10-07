@@ -18,9 +18,12 @@ brackets.
    Vellum). Surplus deposits; deficit withdraws — same model as gold.
 
 ### Non-goals (explicit)
-- **Guild bank** — separate API, per-rank withdrawal limits; out of scope.
+- **Guild bank** — separate API, per-rank withdrawal limits; out of scope. Exception: the AH plan
+  (card 0001) moves its own planned items through the AH characters' shared guild bank, and
+  nothing else.
 - **Currencies** (Artisan's Mettle, Valorstones, etc.) — not items, can't enter the warband bank.
 - **Equipment / gear / quality-variant items** — only stackable, account-bank-allowed commodities.
+  Exception: AH-plan items (card 0001), which can be gear.
 - **Void storage / reagent *bank* tabs** — untouched.
 
 ## 2. The three banks — correctness contract
@@ -32,7 +35,7 @@ is open."
 |---|---|---|---|
 | Character bank | `Character` (0) | `CharacterBankTab_1..6` = 6–11 | per-character — **never touched** |
 | **Warband / account** | `Account` (2) | `AccountBankTab_1..5` = 12–16 | account-wide, faction-agnostic — **our only target** |
-| Guild bank | `Guild` (1) | separate API | out of scope |
+| Guild bank | `Guild` (1) | separate API | AH-plan items only (card 0001) |
 
 Two traps this creates:
 

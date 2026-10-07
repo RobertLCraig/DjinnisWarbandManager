@@ -53,6 +53,8 @@ local defaults = {
         simulate = false,              -- dry-run: report, never move anything
         itemEnabled = false,           -- items OFF by default (safety, DESIGN S8)
         itemFirstRunConfirmed = false, -- first real item run requires opt-in
+        ahPlanEnabled = false,         -- AH plan (card 0001): OFF until turned on
+        ahPlanConfirmed = false,       -- AH plan dry-runs until confirmed once
         debug = false,                 -- verbose tracing for diagnosis
         sortAfterItems = false,        -- run C_Container.SortBank after item moves
         defaultTargetGold = 1000,      -- LEGACY (Phase 1): read once for migration
@@ -83,6 +85,7 @@ local LOG_CAP = 200
 
 ns.sessionPaused = false
 ns.bankState = "closed"               -- "closed" | "opening" | "ready"
+ns.guildBankOpen = false              -- guild bank frame up (AH plan transport)
 
 local sawBanker = false
 local uiReady = false
@@ -225,7 +228,32 @@ function DWM:_TryTransitionReady()
     if ns.ItemLedger then ns.ItemLedger:SnapshotWarband() end
 end
 
+-- Guild bank (card 0001): the AH plan moves items through ONE guild bank that
+-- every AH character belongs to, because the warband bank is often full.
+-- Nothing else in DWM touches a guild bank.
+local GUILD_BANKER = (PIT and PIT.GuildBanker) or 10
+local GUILD_SETTLE = 1.5   -- seconds for QueryGuildBankTab replies before the first scan
+
+function DWM:_OnGuildBankOpened()
+    ns.guildBankOpen = true
+    if not (ns.AHPlan and ns.AHPlan:CanUseGuildBank()) then return end
+    if not self.db.profile.enabled or ns.sessionPaused then return end
+    -- Tab contents are only known after a query; ask for every viewable tab,
+    -- then run once the replies have had time to land.
+    for tab = 1, (GetNumGuildBankTabs() or 0) do QueryGuildBankTab(tab) end
+    self:ScheduleTimer(function()
+        if not ns.guildBankOpen then return end
+        local ItemEngine = self:GetModule("ItemEngine", true)
+        if ItemEngine then ItemEngine:Run("bank-open", "guild") end
+    end, GUILD_SETTLE)
+end
+
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)
+    if interactionType == GUILD_BANKER then
+        self:Debug("guild bank: opened")
+        self:_OnGuildBankOpened()
+        return
+    end
     if BANKER_TYPES[interactionType] then
         sawBanker = true
         if ns.bankState == "closed" then ns.bankState = "opening" end
@@ -235,6 +263,12 @@ function DWM:PLAYER_INTERACTION_MANAGER_FRAME_SHOW(_, interactionType)
 end
 
 function DWM:PLAYER_INTERACTION_MANAGER_FRAME_HIDE(_, interactionType)
+    if interactionType == GUILD_BANKER then
+        ns.guildBankOpen = false
+        local ItemEngine = self:GetModule("ItemEngine", true)
+        if ItemEngine and ItemEngine.Abort then ItemEngine:Abort("guild-bank-closed") end
+        return
+    end
     if BANKER_TYPES[interactionType] then
         ResetBankState()
     end
@@ -259,6 +293,7 @@ function DWM:PLAYER_REGEN_DISABLED()
     local ItemEngine = self:GetModule("ItemEngine", true)
     if ItemEngine and ItemEngine.Abort then ItemEngine:Abort("combat") end
     ResetBankState()
+    ns.guildBankOpen = false
 end
 
 --============================================================================

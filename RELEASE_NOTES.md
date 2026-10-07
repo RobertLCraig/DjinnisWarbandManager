@@ -10,7 +10,18 @@
 
 # Release Notes
 
-## Version: 0.3.2
+## Version: 0.4.0
+
+- **New: AH plan (off by default).** Spreads auction stock across your
+  auction-house characters. A script outside the game
+  (`tools/ahplan/build.ps1`) reads your saved data, TSM prices and history,
+  and live listings, and writes `Data/AHPlan.lua`. At the shared guild bank,
+  the character with too much deposits, and the others withdraw their
+  planned copies. Posted and mailed copies count as held. Turn it on with
+  `/dwm ahplan on`. The first run is a dry run until `/dwm ahplanconfirm`.
+  Check it with `/dwm ahplanstatus`.
+
+0.3.2:
 
 Phase 5/6 - account-wide item management + profession-conditioned items
 (in progress).
