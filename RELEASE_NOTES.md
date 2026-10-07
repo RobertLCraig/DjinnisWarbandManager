@@ -17,9 +17,13 @@
   (`tools/ahplan/build.ps1`) reads your saved data, TSM prices and history,
   and live listings, and writes `Data/AHPlan.lua`. At the shared guild bank,
   the character with too much deposits, and the others withdraw their
-  planned copies. Posted and mailed copies count as held. Turn it on with
-  `/dwm ahplan on`. The first run is a dry run until `/dwm ahplanconfirm`.
-  Check it with `/dwm ahplanstatus`.
+  planned copies. Posted and mailed copies count as held.
+- **New: AH plan window.** It opens by itself at the plan's guild bank on an
+  AH character. Tick "Use the AH plan", check the list of moves, and press
+  Move items. Tick "Move items by themselves" to skip the button next time.
+  Also in the options panel and the bank button's menu. Movable in Edit Mode.
+- The bank button's right-click now opens a menu (Options, AH plan window,
+  Pause or Resume) instead of pausing at once.
 
 0.3.2:
 

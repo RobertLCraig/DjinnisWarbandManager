@@ -303,5 +303,28 @@ do
     check("withdraw: AutoStoreGuildBankItem on the right slot", c1 and c1.name == "AutoStoreGuildBankItem" and c1[1] == 2 and c1[2] == 1)
 end
 
+-- 11. Not confirmed: opening the guild bank moves nothing, the window's Move items button does.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+DWM.db.profile.ahPlanConfirmed = false
+ns.guildBankOpen = true
+put(world.bags[2], 200, 1)
+do
+    local ok, err = pcall(ns.ItemEngine.Run, ns.ItemEngine, "bank-open", "guild")
+    check("unconfirmed: bank-open run has no error", ok, tostring(err))
+    local moved = false
+    for _, c in ipairs(world.calls) do if c.name == "UseContainerItem" then moved = true end end
+    check("unconfirmed: bank-open run moves nothing", not moved)
+    ns.ItemEngine.session = nil
+    world.calls = {}
+    ok, err = pcall(ns.ItemEngine.Run, ns.ItemEngine, "panel", "guild")
+    check("panel: run has no error", ok, tostring(err))
+    moved = false
+    for _, c in ipairs(world.calls) do if c.name == "UseContainerItem" then moved = true end end
+    check("panel: Move items button moves the item", moved)
+    ns.ItemEngine.session = nil
+end
+ns.guildBankOpen = false
+
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

@@ -62,10 +62,21 @@ function BankButton:_Ensure()
         self:StopMovingOrSizing()
         SavePosition(self)
     end)
-    btn:SetScript("OnClick", function(_, mouseButton)
+    btn:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
-            ns.sessionPaused = not ns.sessionPaused
-            DWM:Print(L["STATUS_PAUSED"]:format(ns.sessionPaused and L["YES"] or L["NO"]))
+            -- A right-click opens a menu and never acts by itself (Rob's rule).
+            MenuUtil.CreateContextMenu(self, function(_, root)
+                root:CreateButton(L["BANKBTN_MENU_OPTIONS"], function()
+                    LibStub("AceConfigDialog-3.0"):Open(ADDON_NAME)
+                end)
+                root:CreateButton(L["BANKBTN_MENU_AHPLAN"], function()
+                    if ns.AHPlanPanel then ns.AHPlanPanel:Show() end
+                end)
+                root:CreateButton(ns.sessionPaused and L["BANKBTN_MENU_RESUME"] or L["BANKBTN_MENU_PAUSE"], function()
+                    ns.sessionPaused = not ns.sessionPaused
+                    DWM:Print(L["STATUS_PAUSED"]:format(ns.sessionPaused and L["YES"] or L["NO"]))
+                end)
+            end)
         else
             LibStub("AceConfigDialog-3.0"):Open(ADDON_NAME)
         end

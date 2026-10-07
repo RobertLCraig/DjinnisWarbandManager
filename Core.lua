@@ -64,6 +64,7 @@ local defaults = {
         -- AceDB resurrecting them. _seeded guards the one-time seed/migration.
         minimap = { hide = false },
         bankButton = { hide = false, point = "CENTER", relPoint = "CENTER", x = 0, y = 220 },
+        ahPlanPanel = { point = "CENTER", relPoint = "CENTER", x = 380, y = 40 },
     },
     -- Phase 1 per-character fields kept ONLY for one-time migration into the
     -- global roster (Roster:EnsureCurrent). New config lives in db.global.
@@ -236,13 +237,19 @@ local GUILD_SETTLE = 1.5   -- seconds for QueryGuildBankTab replies before the f
 
 function DWM:_OnGuildBankOpened()
     ns.guildBankOpen = true
-    if not (ns.AHPlan and ns.AHPlan:CanUseGuildBank()) then return end
-    if not self.db.profile.enabled or ns.sessionPaused then return end
+    -- The AH plan window shows for any AH character here, plan on or off, so
+    -- the plan can be switched on from it (card 0002).
+    if not (ns.AHPlan and ns.AHPlan:InTransportGuild()) then return end
     -- Tab contents are only known after a query; ask for every viewable tab,
-    -- then run once the replies have had time to land.
+    -- then act once the replies have had time to land.
     for tab = 1, (GetNumGuildBankTabs() or 0) do QueryGuildBankTab(tab) end
     self:ScheduleTimer(function()
         if not ns.guildBankOpen then return end
+        if ns.AHPlanPanel then ns.AHPlanPanel:OnGuildBankReady() end
+        -- Moves start by themselves only when "Move items by themselves" is
+        -- ticked; otherwise the window's list is the dry run.
+        if not (self.db.profile.enabled and self.db.profile.ahPlanConfirmed) then return end
+        if ns.sessionPaused or not ns.AHPlan:CanUseGuildBank() then return end
         local ItemEngine = self:GetModule("ItemEngine", true)
         if ItemEngine then ItemEngine:Run("bank-open", "guild") end
     end, GUILD_SETTLE)
@@ -267,6 +274,7 @@ function DWM:PLAYER_INTERACTION_MANAGER_FRAME_HIDE(_, interactionType)
         ns.guildBankOpen = false
         local ItemEngine = self:GetModule("ItemEngine", true)
         if ItemEngine and ItemEngine.Abort then ItemEngine:Abort("guild-bank-closed") end
+        if ns.AHPlanPanel then ns.AHPlanPanel:OnGuildBankClosed() end
         return
     end
     if BANKER_TYPES[interactionType] then

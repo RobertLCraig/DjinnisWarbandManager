@@ -29,6 +29,7 @@ Modules\Balancer.lua
 Modules\ItemEngine.lua
 Modules\ItemLedger.lua
 Modules\BankButton.lua
+Modules\AHPlanPanel.lua
 
 # Options (AceConfig table -> panel + slash commands)
 Options.lua

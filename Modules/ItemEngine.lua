@@ -489,6 +489,7 @@ function ItemEngine:_Finish(reason)
     -- the warband ran out - always, even on a silent bank-open run. Not at the
     -- guild bank: the warband cannot be read there, so every count looks short.
     if s.kind ~= "guild" then self:_ReportShortfalls() end
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
 end
 
 function ItemEngine:Abort(reason)
@@ -500,6 +501,7 @@ function ItemEngine:Abort(reason)
     -- Return any half-moved split stack to where it came from.
     ClearCursor()
     if v then DWM:Print(L["MSG_ITEM_ABORTED"]) end
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
 end
 
 -- Guild bank version of _DoOneMove (card 0001). A whole stack deposits the way
@@ -670,6 +672,7 @@ function ItemEngine:_Step()
         return self:_Finish("blocked")
     end
     s.moves = s.moves + 1
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
     s.awaiting = true
     s.waitTicks = 0
     self:_Arm()
@@ -705,7 +708,10 @@ function ItemEngine:Run(reason, kind)
         return
     end
 
-    local manual   = (reason == "manual")
+    -- "panel": the AH plan window's Move items button. The person has just
+    -- read the list of moves, so that press IS the confirmation.
+    local fromPanel = (reason == "panel")
+    local manual   = (reason == "manual") or fromPanel
     local simulate = DWM.db.profile.simulate and true or false
     local verbose  = manual or simulate
 
@@ -750,13 +756,13 @@ function ItemEngine:Run(reason, kind)
 
     -- First real run must be explicitly confirmed (DESIGN S8).
     local forcedSim = false
-    if not DWM.db.profile.itemFirstRunConfirmed and not simulate then
+    if not DWM.db.profile.itemFirstRunConfirmed and not simulate and not fromPanel then
         forcedSim = true
         DWM:Print(L["MSG_ITEM_FIRSTRUN"])
     end
     -- The AH plan (card 0001) has its own opt-in: it can move hundreds of
     -- items that no purpose ever touched, so it dry-runs until confirmed.
-    if not forcedSim and not simulate and not DWM.db.profile.ahPlanConfirmed then
+    if not forcedSim and not simulate and not fromPanel and not DWM.db.profile.ahPlanConfirmed then
         local targets = ns.Purposes:ResolveItemsForCurrent()
         for _, e in ipairs(plan) do
             if targets[e.itemID] and targets[e.itemID].ah then

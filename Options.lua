@@ -711,16 +711,23 @@ local options = {
             set = function(_, v)
                 P().ahPlanEnabled = v
                 DWM:Print(L["MSG_AHPLAN_TOGGLED"]:format(v and L["ON"] or L["OFF"]))
+                if ns.AHPlanPanel then ns.AHPlanPanel:Refresh() end
             end,
         },
+        ahplanwindow = {
+            type = "execute", order = 28.15,
+            name = L["OPT_AHPLANWINDOW_NAME"], desc = L["OPT_AHPLANWINDOW_DESC"],
+            func = function() if ns.AHPlanPanel then ns.AHPlanPanel:Show() end end,
+        },
         ahplanconfirm = {
-            type = "execute", order = 28.3,
+            type = "toggle", order = 28.3,
             name = L["OPT_AHPLANCONFIRM_NAME"], desc = L["OPT_AHPLANCONFIRM_DESC"],
-            confirm = true, confirmText = L["OPT_AHPLANCONFIRM_DESC"],
-            disabled = function() return P().ahPlanConfirmed end,
-            func = function()
-                P().ahPlanConfirmed = true
-                DWM:Print(L["MSG_AHPLAN_CONFIRMED"])
+            disabled = function() return not P().ahPlanEnabled end,
+            get = function() return P().ahPlanConfirmed end,
+            set = function(_, v)
+                P().ahPlanConfirmed = v
+                if v then DWM:Print(L["MSG_AHPLAN_CONFIRMED"]) end
+                if ns.AHPlanPanel then ns.AHPlanPanel:Refresh() end
             end,
         },
         ahplanstatus = {

@@ -61,12 +61,32 @@ end
 -- Only an AH character, and only in the plan's transport guild: every AH
 -- character is a member, so it is the one bank they all share.
 function AHPlan:CanUseGuildBank()
-    if not self:IsEnabled() or self:Role() ~= "poster" then return false end
-    local want = Data().transportGuild
+    return self:IsEnabled() and self:InTransportGuild()
+end
+
+-- An AH character in the plan's transport guild, whether or not the plan is on.
+-- The AH plan window shows at the guild bank on this test, so the plan can be
+-- switched on from there.
+function AHPlan:InTransportGuild()
+    local d = Data()
+    if not d or self:Role() ~= "poster" then return false end
+    local want = d.transportGuild
     if not want or not IsInGuild() then return false end
     local ok, guildName = pcall(GetGuildInfo, "player")
     if not ok or not guildName or IsSecret(guildName) then return false end
     return guildName == want
+end
+
+-- Plan date, this character, and how many copies of how many items it should hold.
+function AHPlan:Summary()
+    local d = Data()
+    if not d then return nil end
+    local me = self:CurrentFullName()
+    local items, copies = 0, 0
+    local mine = me and d.posters and d.posters[me]
+    for _, qty in pairs(mine or {}) do items = items + 1; copies = copies + qty end
+    return { generated = d.generated, guild = d.transportGuild, me = me,
+             poster = mine ~= nil, items = items, copies = copies }
 end
 
 -- "poster" | nil for the current character.
