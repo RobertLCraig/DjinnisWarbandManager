@@ -53,3 +53,10 @@ offline checks pass.
 **2026-10-08** The new debug found the cause: all 13 warband slots read `isLocked`, with 60 free bag
 slots. Blizzard's bank right-click does not check `isLocked`, so whole-stack take-outs now ignore it
 too (505d946). Why the slots read locked is not known. Open check: do the 13 come out on What?
+
+**2026-10-08** Rob: the items stayed greyed out through several reloads. A full logout of several
+minutes cleared them, and the addon then moved items normally. So it was a lock held on the game's
+side. Fix 430eefc: a batch move now counts when it lands, not when it is sent, and a run where every
+refused slot is still locked stops with "log out for a few minutes". 52 offline checks pass.
+**Open risk:** the locks may have come from our own 74-move batch just before. If greyed items show
+up again after a big batch, cut `BATCH_MAX` in `Modules/ItemEngine.lua`.
