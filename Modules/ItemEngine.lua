@@ -691,10 +691,11 @@ local function NormalBags()
 end
 
 -- Turn plan entries into moves: { bag, slot, to, n, endQty, itemID, dir, use }.
--- A whole stack out of the warband bank is a right-click (use = true, as
--- Blizzard's BankFrame does it): the server picks the bag slot. It still
--- counts one free bag slot, so a batch never sends more than the bags hold.
--- A part stack goes to the free slot it was given.
+-- A whole stack moves by UseContainerItem (use = true), as Blizzard's
+-- BankFrame does it: out of the warband bank by right-click, into it with
+-- the warband bank type. The server picks the slot. It still counts one free
+-- slot, so a batch never sends more than the other side holds. A part stack
+-- goes to the free slot it was given, through the cursor.
 function ItemEngine:_BuildBatch(plan)
     local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
     DWM:Debug(("_BuildBatch: %d plan entries, %d empty warband slots, %d empty bag slots")
@@ -717,8 +718,8 @@ function ItemEngine:_BuildBatch(plan)
                     -- game 2026-10-08 on What: 13 warband items all read as
                     -- locked with nothing moving, so a lock alone must not
                     -- stop a whole-stack take-out.
-                    local whole = info and not deposit and n == count
-                    local ok = info and (whole or not info.isLocked)
+                    local whole = info and n == count
+                    local ok = info and ((whole and not deposit) or not info.isLocked)
                     if info and info.isLocked then locked = locked + 1 end
                     if ok and deposit then
                         ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT)
@@ -824,7 +825,11 @@ function ItemEngine:_StepBatch()
 
     for _, m in ipairs(moves) do
         ClearCursor()
-        if m.use then
+        if m.use and m.dir == "deposit" then
+            -- Blizzard's own warband deposit (BankFrame.lua): no cursor, and
+            -- the bank type sends it to the warband, not the character bank.
+            C_Container.UseContainerItem(m.bag, m.slot, nil, BANKTYPE_ACCOUNT, false)
+        elseif m.use then
             C_Container.UseContainerItem(m.bag, m.slot)
         else
             C_Container.SplitContainerItem(m.bag, m.slot, m.n)

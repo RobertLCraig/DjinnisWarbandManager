@@ -443,19 +443,17 @@ put(world.warband, 999, 1)              -- warband slot 1 taken
 do
     local E = ns.ItemEngine
     E:Run("panel", "warband")
-    local splits, picks, targets = 0, 0, {}
+    -- Whole stacks: Blizzard's warband deposit, UseContainerItem with the warband bank type.
+    local uses, toWarband, splits = 0, 0, 0
     for _, c in ipairs(world.calls) do
-        if c.name == "SplitContainerItem" then splits = splits + 1 end
-        if c.name == "PickupContainerItem" then
-            picks = picks + 1
-            targets[c[1] .. ":" .. c[2]] = true
+        if c.name == "UseContainerItem" then
+            uses = uses + 1
+            if c[4] == Enum.BankType.Account then toWarband = toWarband + 1 end
         end
+        if c.name == "SplitContainerItem" then splits = splits + 1 end
     end
-    check("batch: all 4 moves sent in one step", splits == 4 and picks == 4, splits .. "/" .. picks)
-    local n = 0
-    for k in pairs(targets) do n = n + 1 end
-    check("batch: 4 different target slots", n == 4)
-    check("batch: never the taken warband slot", not targets["12:1"])
+    check("batch: all 4 moves sent in one step", uses == 4 and splits == 0, uses .. "/" .. splits)
+    check("batch: every deposit aimed at the warband bank", toWarband == 4)
     check("batch: total for the progress bar", E.session and E.session.total == 4)
 
     world.calls = {}
