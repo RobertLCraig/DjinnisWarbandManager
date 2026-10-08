@@ -58,5 +58,10 @@ too (505d946). Why the slots read locked is not known. Open check: do the 13 com
 minutes cleared them, and the addon then moved items normally. So it was a lock held on the game's
 side. Fix 430eefc: a batch move now counts when it lands, not when it is sent, and a run where every
 refused slot is still locked stops with "log out for a few minutes". 52 offline checks pass.
+**2026-10-08** Lostpets: pet deposits stopped "blocked" after one second while pets were still
+landing, and many pets went grey. TSM's `MoveThread` yields a frame after every move and never gives
+up on a move in flight; this addon sent the whole batch in one go. Fix aac223c: one move per frame,
+and a wait on copies in flight that restarts whenever one lands (10 s with nothing landing, then
+the log-out message). Whole-stack deposits now use Blizzard's warband deposit call (d92ffc7).
 **Open risk:** the locks may have come from our own 74-move batch just before. If greyed items show
 up again after a big batch, cut `BATCH_MAX` in `Modules/ItemEngine.lua`.
