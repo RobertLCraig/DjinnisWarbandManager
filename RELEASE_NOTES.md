@@ -33,6 +33,11 @@
 - **Faster warband moves.** Items now move to and from the warband bank in
   batches, each to its own empty slot, instead of one at a time. Guild bank
   moves wait less between items.
+- A sale item never waits in the warband bank. An AH character there takes
+  every planned copy, and puts the ones meant for others into the shared
+  guild bank. The window marks them "for the guild bank".
+- If the game holds items locked (greyed out), a run stops and says to log
+  out for a few minutes. A /reload does not clear it.
 - The AH plan window shows a progress bar and what is moving, and says why
   a run stopped. Long text no longer overlaps the checkboxes.
 
