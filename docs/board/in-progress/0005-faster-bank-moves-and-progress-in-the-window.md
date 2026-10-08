@@ -42,3 +42,10 @@ can transfer significantly faster (again check how TSM does this, both for warba
 
 **2026-10-08** 48 offline checks pass; 6 new ones cover the batch (all moves in one step, distinct
 target slots, the taken slot skipped, waits while in flight, ends when all landed).
+
+**2026-10-08** In game on What: 13 warband take-outs (single gear items) built 0 moves with 60 bag
+slots free, so the run stopped "blocked". The cause of the missed free slot is not proven. Fix in
+79a7348: a whole stack now leaves the warband bank by right-click (`UseContainerItem(tab, slot)`, as
+`BankFrame.lua` does), so the server picks the bag slot. A part stack still needs a free slot found
+first. `/dwm debug on` now prints the empty slot counts and, per item, why it made no move. 50
+offline checks pass.
