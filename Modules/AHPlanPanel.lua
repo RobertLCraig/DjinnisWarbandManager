@@ -1,5 +1,5 @@
 --[[
-    Djinni's Warband Manager - AHPlanPanel (card 0002)
+    Djinni's Warband Manager - AHPlanPanel (cards 0002, 0004, 0005)
 
     The AH plan's window, so nobody has to remember /dwm commands. It opens by
     itself when an AH character opens the plan's guild bank, or a feeder opens
@@ -9,9 +9,13 @@
       * Two checkboxes: "Use the AH plan" (ahPlanEnabled) and "Move items by
         themselves" (ahPlanConfirmed). With the second one off, nothing moves
         until "Move items" is pressed; the list IS the dry run.
-      * A list of the moves the item engine would make now, from
-        ItemEngine:BuildPlan("guild"), with item tooltips.
-      * "Move items" runs the engine once. Progress shows in the window.
+      * A list of the moves the item engine would make now, with item
+        tooltips. It stays live while items move, so it shrinks as they land.
+      * "Move items" runs the engine once. A progress bar and a status line
+        show what is moving, how many have landed, and why a run stopped.
+
+    Each line is anchored under the one above it, so a summary or hint that
+    wraps onto more lines pushes the rest down instead of overlapping it.
 
     Plain frame, no secure code, so combat lockdown does not apply; the engine
     itself aborts on combat. Movable by dragging, and from Blizzard Edit Mode
@@ -27,7 +31,9 @@ ns.AHPlanPanel = Panel
 
 local ROW_H = 22
 local frame, scrollBox, summaryText, hintText, enableCheck, autoCheck, moveBtn
+local bar, statusText
 local editPreview = false   -- shown only because Edit Mode is open
+local lastResult            -- { reason, done, total } of the last run, until the next one
 local CurrentKind, AHMoves  -- defined under Refresh, used by the buttons
 
 local function P() return DWM.db.profile end
@@ -86,10 +92,10 @@ local function InitRow(row, e)
         verb, e.amount, ItemText(e.itemID), e.have, after))
 end
 
-local function MakeCheck(label, tip, y, onClick)
+local function MakeCheck(label, tip, anchor, x, y, onClick)
     local c = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     c:SetSize(24, 24)
-    c:SetPoint("TOPLEFT", 14, y)
+    c:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", x, y)
     c.Text:SetText(label)
     c.Text:SetFontObject("GameFontHighlight")
     c:SetScript("OnClick", function(self) onClick(self:GetChecked() and true or false) end)
@@ -140,7 +146,7 @@ end
 
 local function Build()
     frame = CreateFrame("Frame", "DWMAHPlanPanel", UIParent, "BasicFrameTemplateWithInset")
-    frame:SetSize(400, 460)
+    frame:SetSize(420, 540)
     frame:SetFrameStrata("HIGH")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -152,42 +158,35 @@ local function Build()
     if frame.TitleText then frame.TitleText:SetText(L["AHPANEL_TITLE"]) end
     tinsert(UISpecialFrames, "DWMAHPlanPanel")   -- Escape closes it
 
+    -- Top: summary, two checkboxes, hint. Each sits under the one above, so
+    -- text that wraps pushes the rest down.
     summaryText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     summaryText:SetPoint("TOPLEFT", 16, -32)
     summaryText:SetPoint("RIGHT", -16, 0)
     summaryText:SetJustifyH("LEFT")
 
-    enableCheck = MakeCheck(L["OPT_AHPLAN_NAME"], L["OPT_AHPLAN_DESC"], -54, function(v)
+    enableCheck = MakeCheck(L["OPT_AHPLAN_NAME"], L["OPT_AHPLAN_DESC"], summaryText, -4, -6, function(v)
         P().ahPlanEnabled = v
         Panel:Refresh()
     end)
-    autoCheck = MakeCheck(L["AHPANEL_AUTO"], L["AHPANEL_AUTO_TIP"], -80, function(v)
+    autoCheck = MakeCheck(L["AHPANEL_AUTO"], L["AHPANEL_AUTO_TIP"], enableCheck, 0, -2, function(v)
         P().ahPlanConfirmed = v
         Panel:Refresh()
     end)
 
     hintText = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    hintText:SetPoint("TOPLEFT", 18, -112)
+    hintText:SetPoint("TOPLEFT", autoCheck, "BOTTOMLEFT", 4, -6)
     hintText:SetPoint("RIGHT", -18, 0)
     hintText:SetJustifyH("LEFT")
 
-    scrollBox = CreateFrame("Frame", nil, frame, "WowScrollBoxList")
-    scrollBox:SetPoint("TOPLEFT", 12, -136)
-    scrollBox:SetPoint("BOTTOMRIGHT", -30, 42)
-    local scrollBar = CreateFrame("EventFrame", nil, frame, "MinimalScrollBar")
-    scrollBar:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 6, 0)
-    scrollBar:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 6, 0)
-    local view = CreateScrollBoxListLinearView()
-    view:SetElementExtent(ROW_H)
-    view:SetElementInitializer("Button", InitRow)
-    ScrollUtil.InitScrollBoxListWithScrollBar(scrollBox, scrollBar, view)
-
+    -- Bottom: buttons, progress bar, status line.
     moveBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     moveBtn:SetSize(140, 24)
     moveBtn:SetPoint("BOTTOMLEFT", 12, 12)
     moveBtn:SetText(L["AHPANEL_MOVE"])
     moveBtn:SetScript("OnClick", function()
         local e, kind = Engine(), CurrentKind()
+        lastResult = nil
         if e and kind then e:Run("panel", kind) end
         Panel:Refresh()
     end)
@@ -202,6 +201,35 @@ local function Build()
         end
         Panel:ScheduleTimer("Refresh", 1)
     end)
+
+    bar = CreateFrame("StatusBar", nil, frame)
+    bar:SetPoint("BOTTOMLEFT", 16, 44)
+    bar:SetPoint("BOTTOMRIGHT", -16, 44)
+    bar:SetHeight(12)
+    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    bar:SetStatusBarColor(0.2, 0.75, 0.3)
+    bar:SetMinMaxValues(0, 1)
+    local bg = bar:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0, 0, 0, 0.5)
+
+    statusText = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    statusText:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", 0, 4)
+    statusText:SetPoint("RIGHT", -16, 0)
+    statusText:SetJustifyH("LEFT")
+    statusText:SetWordWrap(false)
+
+    -- Middle: the list fills whatever is left between hint and status line.
+    scrollBox = CreateFrame("Frame", nil, frame, "WowScrollBoxList")
+    scrollBox:SetPoint("TOPLEFT", hintText, "BOTTOMLEFT", -6, -8)
+    scrollBox:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, 80)
+    local scrollBar = CreateFrame("EventFrame", nil, frame, "MinimalScrollBar")
+    scrollBar:SetPoint("TOPLEFT", scrollBox, "TOPRIGHT", 6, 0)
+    scrollBar:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 6, 0)
+    local view = CreateScrollBoxListLinearView()
+    view:SetElementExtent(ROW_H)
+    view:SetElementInitializer("Button", InitRow)
+    ScrollUtil.InitScrollBoxListWithScrollBar(scrollBox, scrollBar, view)
 
     ApplyPosition(frame)
     frame:Hide()
@@ -242,13 +270,45 @@ local function Moves()
     local kind = CurrentKind()
     if ns.guildBankOpen and not kind then return {}, L["AHPANEL_WRONG_GUILD"]:format(s.guild or "?") end
     if not kind then return {}, L["AHPANEL_OPEN_GB"]:format(s.guild or "?") end
-    local e = Engine()
-    if not e then return {}, "" end
-    if e.session then return {}, L["AHPANEL_MOVING"]:format(e.session.moves or 0) end
     local plan, warns = AHMoves(kind)
-    local hint = (#plan == 0) and L["AHPANEL_NOTHING"] or L["AHPANEL_COUNT"]:format(#plan)
+    local hint
+    if Running() then
+        hint = L["AHPANEL_MOVING"]
+    else
+        hint = (#plan == 0) and L["AHPANEL_NOTHING"] or L["AHPANEL_COUNT"]:format(#plan)
+    end
     if warns and warns[1] then hint = hint .. "  |cFFFFCC00" .. warns[1] .. "|r" end
     return plan, hint
+end
+
+local STOP_REASON = {
+    stuck = "AHPANEL_WHY_STUCK", blocked = "AHPANEL_WHY_BLOCKED", cap = "AHPANEL_WHY_CAP",
+    cursor = "AHPANEL_WHY_CURSOR", combat = "AHPANEL_WHY_COMBAT",
+}
+
+-- Progress bar and status line: the run in progress, else the last result.
+local function ShowProgress()
+    local e = Engine()
+    local s = e and e.session
+    if s then
+        local total = math.max(s.total or 0, 1)
+        bar:SetValue(math.min((s.done or 0) / total, 1))
+        bar:Show()
+        statusText:SetText(L["AHPANEL_PROGRESS"]:format(s.done or 0, s.total or 0, s.current or "..."))
+    elseif lastResult then
+        local total = math.max(lastResult.total, 1)
+        bar:SetValue(math.min(lastResult.done / total, 1))
+        bar:Show()
+        if lastResult.reason == "done" then
+            statusText:SetText("|cFF33FF66" .. L["AHPANEL_DONE"]:format(lastResult.done, lastResult.total) .. "|r")
+        else
+            local why = L[STOP_REASON[lastResult.reason] or "AHPANEL_WHY_CLOSED"]
+            statusText:SetText("|cFFFFCC00" .. L["AHPANEL_STOPPED"]:format(lastResult.done, lastResult.total, why) .. "|r")
+        end
+    else
+        bar:Hide()
+        statusText:SetText("")
+    end
 end
 
 function Panel:Refresh()
@@ -271,10 +331,12 @@ function Panel:Refresh()
     hintText:SetText(hint or "")
     scrollBox:SetDataProvider(CreateDataProvider(plan), ScrollBoxConstants.RetainScrollPosition)
     moveBtn:SetEnabled(#plan > 0 and not Running())
+    ShowProgress()
 end
 
 function Panel:Show()
     if not frame then Build() end
+    if not frame:IsShown() then lastResult = nil end
     ApplyPosition(frame)
     frame:Show()
     self:Refresh()
@@ -313,15 +375,22 @@ function Panel:OnBankClosed()
     if frame and frame:IsShown() and not editPreview and not ns.guildBankOpen then frame:Hide() end
 end
 
--- ItemEngine: a session moved an item, finished, or stopped. Counts settle a
--- moment after the last move, so the list is rebuilt a little later.
+-- ItemEngine: a session moved items. Counts settle a moment after a move,
+-- so the list is rebuilt a little later, at most a few times a second.
 function Panel:OnEngineChanged()
     if not frame or not frame:IsShown() then return end
     if self._pending then return end
     self._pending = self:ScheduleTimer(function()
         self._pending = nil
         self:Refresh()
-    end, 0.6)
+    end, 0.3)
+end
+
+-- ItemEngine: a session ended. Keep the result on screen until the next run.
+function Panel:OnEngineFinished(reason, done, total)
+    lastResult = { reason = reason, done = done, total = total }
+    if reason == "done" and frame and frame:IsShown() then PlaySound(SOUNDKIT.UI_BAG_SORTING_01) end
+    self:OnEngineChanged()
 end
 
 function Panel:GET_ITEM_INFO_RECEIVED() self:OnEngineChanged() end

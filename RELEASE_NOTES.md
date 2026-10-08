@@ -30,6 +30,11 @@
   them up. The AH plan window opens at that guild bank, and at a bank when
   there are AH plan moves.
 - A bank visit no longer prints the AH plan's dry run to chat.
+- **Faster warband moves.** Items now move to and from the warband bank in
+  batches, each to its own empty slot, instead of one at a time. Guild bank
+  moves wait less between items.
+- The AH plan window shows a progress bar and what is moving, and says why
+  a run stopped. Long text no longer overlaps the checkboxes.
 
 0.3.2:
 

@@ -58,8 +58,8 @@ _G.C_Container = {
         return e and { stackCount = e.count, isLocked = false, quality = 3, itemID = e.id }
     end,
     UseContainerItem = function(...) log("UseContainerItem", ...) end,
-    PickupContainerItem = function(...) log("PickupContainerItem", ...) end,
-    SplitContainerItem = function(...) log("SplitContainerItem", ...) end,
+    PickupContainerItem = function(...) world.cursor = nil; log("PickupContainerItem", ...) end,
+    SplitContainerItem = function(...) world.cursor = "item"; log("SplitContainerItem", ...) end,
     SortBank = function() end,
 }
 _G.C_Bank = {
@@ -83,8 +83,8 @@ _G.C_Item = {
     IsBound = function(loc) return loc.bound and true or false end,
 }
 _G.GetTime = function() return world.now or 0 end
-_G.GetCursorInfo = function() return nil end
-_G.ClearCursor = function() end
+_G.GetCursorInfo = function() return world.cursor end
+_G.ClearCursor = function() world.cursor = nil end
 
 -- Guild bank API, as Blizzard_GuildBankUI calls it.
 _G.GetNumGuildBankTabs = function() return #world.guild end
@@ -427,6 +427,44 @@ do
     ns.AHPlanData.generated = "2026-10-09 09:00"
     check("feeder: new plan resets the count", ns.AHPlan:Pulled(500) == 0)
 end
+-- 14. Warband batch (card 0005, TSM's method): every move is sent in one step, each from its own
+-- source slot to its own empty warband slot, and the next batch waits until they have landed.
+ns.AHPlanData.feeders["Jinn-Shadowsong"].items = { [500] = 3, [501] = 1 }
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "Jinn-Shadowsong"
+world.guildName = "Transmog DOESNT Sell"
+ns.bankState = "ready"
+world.now = 300
+put(world.bags[0], 500, 1); put(world.bags[1], 500, 1); put(world.bags[2], 500, 1); put(world.bags[3], 501, 1)
+put(world.warband, 999, 1)              -- warband slot 1 taken
+do
+    local E = ns.ItemEngine
+    E:Run("panel", "warband")
+    local splits, picks, targets = 0, 0, {}
+    for _, c in ipairs(world.calls) do
+        if c.name == "SplitContainerItem" then splits = splits + 1 end
+        if c.name == "PickupContainerItem" then
+            picks = picks + 1
+            targets[c[1] .. ":" .. c[2]] = true
+        end
+    end
+    check("batch: all 4 moves sent in one step", splits == 4 and picks == 4, splits .. "/" .. picks)
+    local n = 0
+    for k in pairs(targets) do n = n + 1 end
+    check("batch: 4 different target slots", n == 4)
+    check("batch: never the taken warband slot", not targets["12:1"])
+    check("batch: total for the progress bar", E.session and E.session.total == 4)
+
+    world.calls = {}
+    E:_Step()                               -- nothing landed yet: wait, do not re-send
+    check("batch: waits while moves are in flight", #world.calls == 0, "calls=" .. #world.calls)
+
+    for bag = 0, 3 do world.bags[bag] = {} end   -- the server lands all four
+    E:_Step()
+    check("batch: done once every move landed", E.session == nil)
+end
+ns.bankState = "closed"
 ns.AHPlanData.feeders = nil
 world.guildName = nil
 ns.guildBankOpen = false

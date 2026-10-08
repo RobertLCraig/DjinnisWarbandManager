@@ -37,7 +37,10 @@ local MAX_WAIT = 8          -- settle ticks with no count change -> give up
 -- Guild bank pacing (card 0002). The server handles one guild bank move at a
 -- time and silently drops a request that arrives while the last one is still
 -- in flight (seen in game 2026-10-07: 2 to 4 moves per click, then stuck).
-local GUILD_GAP = 0.8       -- seconds between confirmed guild moves
+-- TSM sends the next guild move as soon as the last one shows, with no pause
+-- (Core/Service/Banking/Core.lua MoveThread). A short one is kept here,
+-- because the retry below already covers a dropped move.
+local GUILD_GAP = 0.3       -- seconds between confirmed guild moves
 local GUILD_RETRY_WAIT = 3  -- settle ticks before re-sending a dropped guild move
 local GUILD_RETRIES = 3     -- re-sends of one move before giving up
 
@@ -173,41 +176,6 @@ local function FindPlayerStack(itemID, bankType)
             end
         end
     end
-end
-
--- First non-locked warband stack of itemID: bag, slot, count.
-local function FindWarbandStack(itemID)
-    for _, bag in ipairs(WarbandTabs()) do
-        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            if C_Container.GetContainerItemID(bag, slot) == itemID then
-                local info = SlotInfo(bag, slot)
-                if info and not info.isLocked then
-                    return bag, slot, info.stackCount or 0
-                end
-            end
-        end
-    end
-end
-
--- A destination slot for a partial move: prefer a same-item stack with room,
--- else an empty slot. `bags` is the destination container list.
-local function FindDestSlot(bags, itemID)
-    local max = MaxStack(itemID)
-    local emptyBag, emptySlot
-    for _, bag in ipairs(bags) do
-        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            local id = C_Container.GetContainerItemID(bag, slot)
-            if id == itemID and max then
-                local info = SlotInfo(bag, slot)
-                if info and not info.isLocked and (info.stackCount or 0) < max then
-                    return bag, slot
-                end
-            elseif id == nil and not emptyBag then
-                emptyBag, emptySlot = bag, slot
-            end
-        end
-    end
-    return emptyBag, emptySlot
 end
 
 -- For a SPLIT placement we must use a strictly EMPTY slot. Dropping a split
@@ -558,19 +526,29 @@ function ItemEngine:_Finish(reason)
     -- the warband ran out - always, even on a silent bank-open run. Not at the
     -- guild bank: the warband cannot be read there, so every count looks short.
     if s.kind ~= "guild" then self:_ReportShortfalls() end
-    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineFinished(reason, s.done or 0, s.total or 0) end
 end
 
 function ItemEngine:Abort(reason)
     if not self.session then return end
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
-    local v = self.session.verbose
+    local s = self.session
     self.session = nil
     -- Return any half-moved split stack to where it came from.
     ClearCursor()
-    if v then DWM:Print(L["MSG_ITEM_ABORTED"]) end
-    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
+    if s.verbose then DWM:Print(L["MSG_ITEM_ABORTED"]) end
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineFinished(reason, s.done or 0, s.total or 0) end
+end
+
+-- Log a guild move and remember it for the AH plan window's progress line.
+function ItemEngine:_NoteGuildMove(dir, n, itemID)
+    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],
+        n, ItemName(itemID)))
+    if self.session then
+        self.session.lastAmount = n
+        self.session.current = ItemEngine.MoveText(dir, n, itemID)
+    end
 end
 
 -- Guild bank version of _DoOneMove (card 0001). A whole stack deposits the way
@@ -591,7 +569,7 @@ function ItemEngine:_DoOneGuildMove(plan)
                 if count <= e.amount then
                     C_Container.UseContainerItem(bag, slot)
                     QueryGuildBankTab(tab)
-                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_DEPOSIT"], count, ItemName(e.itemID)))
+                    self:_NoteGuildMove("deposit", count, e.itemID)
                     return true
                 end
                 if CursorBusy() then DWM:Debug("_DoOneGuildMove: cursor busy, defer"); return false end
@@ -599,13 +577,14 @@ function ItemEngine:_DoOneGuildMove(plan)
                 C_Container.SplitContainerItem(bag, slot, e.amount)
                 PickupGuildBankItem(tab, gSlot)
                 QueryGuildBankTab(tab)
-                DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_DEPOSIT"], e.amount, ItemName(e.itemID)))
+                self:_NoteGuildMove("deposit", e.amount, e.itemID)
                 return true
             end
         else -- withdraw
             local tab, gSlot, count = FindGuildStack(e.itemID)
             -- A full bag cannot take it: the server would refuse every try.
-            local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
+            -- Backpack and bags 1-4 only: the reagent bag takes reagents only.
+            local dBag, dSlot = FindEmptyDestSlot({ 0, 1, 2, 3, 4 })
             DWM:Debug(("_DoOneGuildMove withdraw item:%d amount=%d -> tab=%s slot=%s count=%s bagSlot=%s")
                 :format(e.itemID, e.amount, tostring(tab), tostring(gSlot), tostring(count), tostring(dSlot)))
             if tab and dBag then
@@ -615,7 +594,7 @@ function ItemEngine:_DoOneGuildMove(plan)
                 if count <= e.amount then
                     AutoStoreGuildBankItem(tab, gSlot)
                     QueryGuildBankTab(tab)
-                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], count, ItemName(e.itemID)))
+                    self:_NoteGuildMove("withdraw", count, e.itemID)
                     return true
                 end
                 if CursorBusy() then DWM:Debug("_DoOneGuildMove: cursor busy, defer"); return false end
@@ -623,7 +602,7 @@ function ItemEngine:_DoOneGuildMove(plan)
                 SplitGuildBankItem(tab, gSlot, e.amount)
                 C_Container.PickupContainerItem(dBag, dSlot)
                 QueryGuildBankTab(tab)
-                DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
+                self:_NoteGuildMove("withdraw", e.amount, e.itemID)
                 return true
             end
         end
@@ -644,61 +623,154 @@ function ItemEngine:_Plan(kind, skipAH)
 end
 
 -- Issue exactly ONE physical move toward the first actionable plan entry.
+-- Guild bank only: the warband bank and the bank move in batches (_StepBatch).
 -- Returns true if a move was issued (caller then waits for the bank to settle).
-function ItemEngine:_DoOneMove(plan, kind)
-    if kind == "guild" then return self:_DoOneGuildMove(plan) end
+function ItemEngine:_DoOneMove(plan)
+    return self:_DoOneGuildMove(plan)
+end
+
+-- Text for the AH plan window's progress line.
+local function MoveText(dir, n, itemID)
+    return ("%s %d x %s"):format(dir == "deposit" and L["AHPANEL_GIVE"] or L["AHPANEL_TAKE"], n, ItemName(itemID))
+end
+ItemEngine.MoveText = MoveText
+
+--============================================================================
+-- Batch moves for the warband bank and the bank (card 0005)
+--
+-- The way TSM does it (TradeSkillMaster Core/Service/Banking/Core.lua
+-- MoveThread and MoveContext.lua): plan every move first, give each one its
+-- own source slot and its own EMPTY target slot, send them all at once, then
+-- wait until every source slot shows the move. Nothing collides, because no
+-- two moves share a slot. One move per server round trip was the old pace.
+--============================================================================
+
+local BATCH_MAX = 60        -- moves sent in one go
+local BATCH_TIMEOUT = 4     -- seconds to wait for a batch before re-planning
+local BATCH_STALLS = 3      -- batches in a row with nothing landed -> give up
+
+-- Empty slots in the given containers, in order: { {bag, slot}, ... }.
+local function EmptySlots(bags)
+    local out = {}
+    for _, bag in ipairs(bags) do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            if C_Container.GetContainerItemID(bag, slot) == nil then out[#out + 1] = { bag, slot } end
+        end
+    end
+    return out
+end
+
+-- Bags an ordinary item may land in: the backpack and bags 1-4, never the
+-- reagent bag, which takes crafting reagents only.
+local function NormalBags()
+    local t = {}
+    for bag = 0, NUM_BAG_SLOTS or 4 do t[#t + 1] = bag end
+    return t
+end
+
+-- Turn plan entries into slot-to-slot moves: { bag, slot, to, n, endQty, itemID, dir }.
+function ItemEngine:_BuildBatch(plan)
+    local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
+    local moves = {}
     for _, e in ipairs(plan) do
-        if e.dir == "deposit" then
-            local bag, slot, count = FindPlayerStack(e.itemID)
-            DWM:Debug(("_DoOneMove deposit item:%d amount=%d -> playerStack bag=%s slot=%s count=%s")
-                :format(e.itemID, e.amount, tostring(bag), tostring(slot), tostring(count)))
-            if bag then
-                if count <= e.amount then
-                    C_Container.UseContainerItem(bag, slot, nil, BANKTYPE_ACCOUNT, false)
-                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_DEPOSIT"], count, ItemName(e.itemID)))
-                    return true
-                end
-                -- partial: split into an EMPTY warband slot (S13.4); never a
-                -- partial stack (overflow strands the cursor).
-                if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
-                local dBag, dSlot = FindEmptyDestSlot(WarbandTabs())
-                DWM:Debug("_DoOneMove deposit empty-dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
-                if dBag then
-                    ClearCursor()
-                    C_Container.SplitContainerItem(bag, slot, e.amount)
-                    C_Container.PickupContainerItem(dBag, dSlot)
-                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_DEPOSIT"], e.amount, ItemName(e.itemID)))
-                    return true
-                end
-            end
-        else -- withdraw
-            local bag, slot, count = FindWarbandStack(e.itemID)
-            DWM:Debug(("_DoOneMove withdraw item:%d amount=%d -> wbStack bag=%s slot=%s count=%s")
-                :format(e.itemID, e.amount, tostring(bag), tostring(slot), tostring(count)))
-            if bag then
-                if count <= e.amount then
-                    -- 2-arg form: the slot is already IN a warband tab, so this
-                    -- moves it OUT to bags. (bankType is only for targeting the
-                    -- warband on a *deposit* from a bag slot.)
-                    C_Container.UseContainerItem(bag, slot)
-                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_WITHDRAW"], count, ItemName(e.itemID)))
-                    return true
-                end
-                if CursorBusy() then DWM:Debug("_DoOneMove: cursor busy, defer"); return false end
-                local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
-                DWM:Debug("_DoOneMove withdraw empty-dest bag=" .. tostring(dBag) .. " slot=" .. tostring(dSlot))
-                if dBag then
-                    ClearCursor()
-                    C_Container.SplitContainerItem(bag, slot, e.amount)
-                    C_Container.PickupContainerItem(dBag, dSlot)
-                    DWM:LogTxn(L["MSG_LOG_ITEM"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
-                    return true
+        local deposit = (e.dir == "deposit")
+        local left = e.amount
+        for _, bag in ipairs(deposit and PlayerBags() or WarbandTabs()) do
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                if left <= 0 or #moves >= BATCH_MAX then break end
+                if C_Container.GetContainerItemID(bag, slot) == e.itemID then
+                    local info = SlotInfo(bag, slot)
+                    local ok = info and not info.isLocked
+                    if ok and deposit then ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT) end
+                    local to = ok and table.remove(deposit and wbEmpty or bagEmpty, 1)
+                    if to then
+                        local count = info.stackCount or 0
+                        local n = math.min(count, left)
+                        moves[#moves + 1] = { bag = bag, slot = slot, to = to, n = n,
+                                              endQty = count - n, itemID = e.itemID, dir = e.dir }
+                        left = left - n
+                    end
                 end
             end
         end
     end
-    DWM:Debug("_DoOneMove: nothing actionable (no stack found / no dest space)")
-    return false   -- nothing actionable (blocked: no space / locked / missing)
+    return moves
+end
+
+-- Has every move in the batch left its source slot? Returns done, landed copies.
+local function BatchState(batch)
+    local done, landed = true, 0
+    for _, m in ipairs(batch) do
+        local id = C_Container.GetContainerItemID(m.bag, m.slot)
+        local info = id == m.itemID and SlotInfo(m.bag, m.slot) or nil
+        local q = info and info.stackCount or 0
+        if (info and info.isLocked) or q > m.endQty then
+            done = false
+        else
+            landed = landed + m.n
+        end
+    end
+    return done, landed
+end
+
+function ItemEngine:_StepBatch()
+    local s = self.session
+    if s.batch then
+        local done, landed = BatchState(s.batch)
+        if not done and GetTime() - s.batchAt < BATCH_TIMEOUT then return self:_Arm(0.25) end
+        s.done = (s.done or 0) + landed
+        s.stalls = (landed == 0) and (s.stalls or 0) + 1 or 0
+        s.batch = nil
+        if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
+        if s.stalls >= BATCH_STALLS then
+            if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
+            return self:_Finish("stuck")
+        end
+    end
+
+    s.iters = s.iters + 1
+    if s.iters > ITER_CAP then return self:_Finish("cap") end
+    local plan = self:_Plan(s.kind, s.skipAH)
+    if #plan == 0 then return self:_Finish("done") end
+    if CursorBusy() then
+        s.cursorWaits = (s.cursorWaits or 0) + 1
+        if s.cursorWaits > 3 then
+            if s.verbose then DWM:Print(L["MSG_ITEM_ABORTED"]) end
+            return self:_Finish("cursor")
+        end
+        return self:_Arm(0.5)
+    end
+    s.cursorWaits = 0
+
+    local moves = self:_BuildBatch(plan)
+    if #moves == 0 then
+        -- A stack still in flight from the last batch cannot be picked yet.
+        if BagsLocked() and (s.lockWaits or 0) < MAX_WAIT then
+            s.lockWaits = (s.lockWaits or 0) + 1
+            return self:_Arm(0.5)
+        end
+        if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
+        return self:_Finish("blocked")
+    end
+    s.lockWaits = 0
+
+    for _, m in ipairs(moves) do
+        ClearCursor()
+        C_Container.SplitContainerItem(m.bag, m.slot, m.n)
+        if GetCursorInfo() == "item" then
+            C_Container.PickupContainerItem(m.to[1], m.to[2])
+        end
+        ClearCursor()
+        DWM:LogTxn(L["MSG_LOG_ITEM"]:format(m.dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],
+            m.n, ItemName(m.itemID)))
+    end
+    DWM:Debug(("_StepBatch: sent %d moves"):format(#moves))
+    s.moves = s.moves + #moves
+    local last = moves[#moves]
+    s.current = MoveText(last.dir, last.n, last.itemID)
+    s.batch, s.batchAt = moves, GetTime()
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
+    self:_Arm(0.25)
 end
 
 function ItemEngine:_Step()
@@ -709,18 +781,19 @@ function ItemEngine:_Step()
     elseif not DWM:IsWarbandUsable() then
         return self:Abort("warband-gone")
     end
+    if s.kind ~= "guild" then return self:_StepBatch() end
 
+    -- GUILD BANK: one move at a time. The server takes one guild bank move
+    -- at a time and drops a request sent while the last is in flight.
     -- SETTLE GATE: never issue the next move until the previous one is
-    -- actually reflected in live counts. Warband transfers are server-
-    -- confirmed and async, so GetItemCount lags; recomputing too early made
-    -- the plan repeat and double-moved (DESIGN S13.3/S13.11).
+    -- actually reflected in live counts (DESIGN S13.3/S13.11).
     if s.awaiting then
         if CountSig() == s.preSig then
             s.waitTicks = (s.waitTicks or 0) + 1
-            -- Guild bank: a dropped move leaves nothing locked in the bags, so
-            -- sending it again cannot double-move. A move still in flight
-            -- keeps its bag slot locked, and then we only wait.
-            if s.kind == "guild" and s.waitTicks > GUILD_RETRY_WAIT
+            -- A dropped move leaves nothing locked in the bags, so sending it
+            -- again cannot double-move. A move still in flight keeps its bag
+            -- slot locked, and then we only wait.
+            if s.waitTicks > GUILD_RETRY_WAIT
                and (s.retries or 0) < GUILD_RETRIES and not BagsLocked() then
                 s.retries = (s.retries or 0) + 1
                 s.moves = s.moves - 1     -- the re-send below counts it again
@@ -739,30 +812,25 @@ function ItemEngine:_Step()
             s.waitTicks = 0
             s.retries = 0
             s.lastConfirmed = GetTime()
+            s.done = (s.done or 0) + (s.lastAmount or 0)
             if s.lastFeed and ns.AHPlan then
                 ns.AHPlan:AddPulled(s.lastFeed[1], s.lastFeed[2])
             end
             s.lastFeed = nil
+            if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
         end
     end
 
-    -- Guild bank: leave the server a moment after each confirmed move.
-    if s.kind == "guild" and s.lastConfirmed then
+    -- Leave the server a moment after each confirmed move.
+    if s.lastConfirmed then
         local left = GUILD_GAP - (GetTime() - s.lastConfirmed)
-        if left > 0 then
-            if self._wd then self:CancelTimer(self._wd) end
-            self._wd = self:ScheduleTimer(function()
-                self._wd = nil
-                if self.session then self:_Step() end
-            end, left)
-            return
-        end
+        if left > 0 then return self:_Arm(left) end
     end
 
     s.iters = s.iters + 1
     if s.iters > ITER_CAP then return self:_Finish("cap") end
 
-    local plan = self:BuildPlan(s.kind)
+    local plan = self:_Plan(s.kind, s.skipAH)
     if #plan == 0 then return self:_Finish("done") end
 
     if CursorBusy() then
@@ -780,10 +848,10 @@ function ItemEngine:_Step()
     -- Snapshot live counts BEFORE issuing so the settle gate can detect the
     -- effect of exactly this move.
     s.preSig = CountSig()
-    local issued = self:_DoOneMove(plan, s.kind)
-    -- Guild bank: a stack still locked by the last move cannot be picked yet.
+    local issued = self:_DoOneMove(plan)
+    -- A stack still locked by the last move cannot be picked yet.
     -- That is a wait, not a dead end.
-    if not issued and s.kind == "guild" and BagsLocked() and (s.lockWaits or 0) < MAX_WAIT then
+    if not issued and BagsLocked() and (s.lockWaits or 0) < MAX_WAIT then
         s.lockWaits = (s.lockWaits or 0) + 1
         return self:_Arm()
     end
@@ -801,12 +869,12 @@ end
 
 -- Wait for the bank to settle, then step again. Event-driven (S13.3/13.5);
 -- the timer is only a failsafe.
-function ItemEngine:_Arm()
+function ItemEngine:_Arm(delay)
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
     self._wd = self:ScheduleTimer(function()
         self._wd = nil
         if self.session then self:_Step() end
-    end, WATCHDOG)
+    end, delay or WATCHDOG)
 end
 
 function ItemEngine:_OnBankChanged()
@@ -917,9 +985,12 @@ function ItemEngine:Run(reason, kind)
     end
 
     DWM:Debug("Run: starting session")
+    local total = 0
+    for _, e in ipairs(plan) do total = total + e.amount end
     self.session = {
         iters = 0, moves = 0, verbose = verbose, kind = kind, skipAH = skipAH,
         awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,
+        total = total, done = 0,   -- copies, for the AH plan window's progress line
     }
     if not self._bucket then
         self._bucket = self:RegisterBucketEvent(
