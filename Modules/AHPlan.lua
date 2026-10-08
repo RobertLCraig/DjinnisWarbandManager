@@ -1,5 +1,5 @@
 --[[
-    Djinni's Warband Manager - AHPlan (card 0001)
+    Djinni's Warband Manager - AHPlan (cards 0001, 0004)
 
     Spreads auction stock across the AH characters. The plan itself is built
     OUTSIDE the game by tools/ahplan/ and shipped as Data/AHPlan.lua
@@ -8,13 +8,19 @@
 
       * A POSTER (an AH character) gets an `exact` target for every planned
         item it holds or should hold: surplus deposits, shortfall withdraws.
-      * Anyone else gets nothing from the plan. Storage characters (Pouches,
-        Shortnbitter, Jinn) cannot open the transport guild bank, so they
-        mail planned items to an AH character on their own realm by hand,
-        and that character's plan sends each copy on.
+      * A FEEDER (card 0004) empties a storage guild bank that no AH character
+        can open: at that guild bank it takes out the planned copies, and at
+        the warband bank it puts them in. The AH characters then withdraw them
+        from the warband bank like any other planned copy. Jinn feeds from
+        Transmog DOESNT Sell, Pouches from Storinator.
+      * Anyone else gets nothing from the plan.
 
-    Deposits go to the transport guild bank only (ItemEngine:BuildPlan), so
-    the warband stays storage; withdrawals come from either bank.
+    A feeder's progress is saved account-wide (db.global.ahFeed), per plan
+    build, so a copy already taken out and sold is never taken out again.
+
+    Posters deposit into the transport guild bank only (ItemEngine:BuildPlan),
+    so the warband takes only what a feeder brings; withdrawals come from
+    either bank.
 
     Copies already posted or waiting in the mail count as held (`pending`),
     read from Syndicator, so a posted copy is never replaced by a second one.
@@ -57,45 +63,82 @@ function AHPlan:IsEnabled()
     return DWM.db.profile.ahPlanEnabled and Data() ~= nil
 end
 
--- May the AH plan move items through the guild bank that is open now?
--- Only an AH character, and only in the plan's transport guild: every AH
--- character is a member, so it is the one bank they all share.
-function AHPlan:CanUseGuildBank()
-    return self:IsEnabled() and self:InTransportGuild()
-end
-
--- An AH character in the plan's transport guild, whether or not the plan is on.
--- The AH plan window shows at the guild bank on this test, so the plan can be
--- switched on from there.
-function AHPlan:InTransportGuild()
-    local d = Data()
-    if not d or self:Role() ~= "poster" then return false end
-    local want = d.transportGuild
-    if not want or not IsInGuild() then return false end
-    local ok, guildName = pcall(GetGuildInfo, "player")
-    if not ok or not guildName or IsSecret(guildName) then return false end
-    return guildName == want
-end
-
--- Plan date, this character, and how many copies of how many items it should hold.
-function AHPlan:Summary()
-    local d = Data()
-    if not d then return nil end
-    local me = self:CurrentFullName()
-    local items, copies = 0, 0
-    local mine = me and d.posters and d.posters[me]
-    for _, qty in pairs(mine or {}) do items = items + 1; copies = copies + qty end
-    return { generated = d.generated, guild = d.transportGuild, me = me,
-             poster = mine ~= nil, items = items, copies = copies }
-end
-
--- "poster" | nil for the current character.
+-- "poster" | "feeder" | nil for the current character.
 function AHPlan:Role()
     local d = Data()
     local me = d and self:CurrentFullName()
     if not me then return nil end
     if d.posters and d.posters[me] then return "poster" end
+    if d.feeders and d.feeders[me] then return "feeder" end
     return nil
+end
+
+-- The guild bank this character's role uses: the transport guild for a
+-- poster, its storage guild for a feeder.
+function AHPlan:RoleGuild()
+    local d, role = Data(), self:Role()
+    if role == "poster" then return d.transportGuild end
+    if role == "feeder" then return d.feeders[self:CurrentFullName()].guild end
+end
+
+-- The role, if this character's guild is the one its role uses, whether or
+-- not the plan is on. The AH plan window shows at the guild bank on this
+-- test, so the plan can be switched on from there.
+function AHPlan:GuildRole()
+    local want = self:RoleGuild()
+    if not want or not IsInGuild() then return nil end
+    local ok, guildName = pcall(GetGuildInfo, "player")
+    if not ok or not guildName or IsSecret(guildName) then return nil end
+    if guildName ~= want then return nil end
+    return self:Role()
+end
+
+-- May the AH plan move items through the guild bank that is open now?
+function AHPlan:CanUseGuildBank()
+    return self:IsEnabled() and self:GuildRole() ~= nil
+end
+
+--============================================================================
+-- Feeder progress (card 0004)
+--============================================================================
+
+-- { [itemID] = copies taken out } for the plan now loaded. A new plan build
+-- starts from zero: the build already counts what is left in the guild bank.
+local function FeedState()
+    local g = DWM.db.global
+    local gen = Data() and Data().generated or "?"
+    if not g.ahFeed or g.ahFeed.plan ~= gen then g.ahFeed = { plan = gen, pulled = {} } end
+    return g.ahFeed.pulled
+end
+
+function AHPlan:Pulled(itemID) return FeedState()[itemID] or 0 end
+
+function AHPlan:AddPulled(itemID, n)
+    local p = FeedState()
+    p[itemID] = math.max(0, (p[itemID] or 0) + n)
+end
+
+--============================================================================
+-- Summary and targets
+--============================================================================
+
+-- Plan date, this character, its role, and what it should hold or take out.
+function AHPlan:Summary()
+    local d = Data()
+    if not d then return nil end
+    local me = self:CurrentFullName()
+    local role = self:Role()
+    local s = { generated = d.generated, me = me, role = role, guild = self:RoleGuild() or d.transportGuild,
+                poster = role == "poster", items = 0, copies = 0, pulled = 0 }
+    if role == "poster" then
+        for _, qty in pairs(d.posters[me]) do s.items = s.items + 1; s.copies = s.copies + qty end
+    elseif role == "feeder" then
+        for id, qty in pairs(d.feeders[me].items or {}) do
+            s.items = s.items + 1; s.copies = s.copies + qty
+            s.pulled = s.pulled + math.min(qty, self:Pulled(id))
+        end
+    end
+    return s
 end
 
 -- Every item ID the plan covers, built once from the posters' lists.
@@ -129,12 +172,24 @@ function AHPlan:PendingCounts()
 end
 
 -- Item targets for the current character, in the ItemEngine's shape:
--- { [itemID] = { qty, mode, pending, ah = true } }. Only items this character
--- holds, has pending, or should hold, so the engine scans a short list.
+-- poster  { [itemID] = { qty, mode = "exact", pending, ah = true } }
+-- feeder  { [itemID] = { qty = 0, mode = "feed", remaining, ah = true, feed = true } }
+-- Only items this character holds, has pending, or should hold or take out,
+-- so the engine scans a short list.
 function AHPlan:TargetsForCurrent()
     local out = {}
     if not self:IsEnabled() then return out end
-    if self:Role() ~= "poster" then return out end
+    local role = self:Role()
+    if role == "feeder" then
+        for id, n in pairs(Data().feeders[self:CurrentFullName()].items or {}) do
+            local remaining = math.max(0, n - self:Pulled(id))
+            if remaining > 0 or DWM:GetOnCharacterCount(id) > 0 then
+                out[id] = { qty = 0, mode = "feed", remaining = remaining, ah = true, feed = true }
+            end
+        end
+        return out
+    end
+    if role ~= "poster" then return out end
     local mine = Data().posters[self:CurrentFullName()]
     local pending = self:PendingCounts()
     for id in pairs(PlannedSet()) do
@@ -149,21 +204,19 @@ end
 
 -- One chat block: plan age, this character's role, and what it should hold.
 function AHPlan:PrintStatus()
-    local d = Data()
-    if not d then DWM:Print(L["MSG_AHPLAN_NODATA"]); return end
-    local me = self:CurrentFullName() or "?"
-    local role = self:Role()
+    local s = self:Summary()
+    if not s then DWM:Print(L["MSG_AHPLAN_NODATA"]); return end
     DWM:Print(L["MSG_AHPLAN_STATUS"]:format(
         DWM.db.profile.ahPlanEnabled and L["ON"] or L["OFF"],
-        tostring(d.generated or "?"),
-        me,
-        role and L["AHPLAN_ROLE_" .. role:upper()] or L["AHPLAN_ROLE_NONE"]))
-    if role == "poster" then
-        local items, copies = 0, 0
-        for _, qty in pairs(d.posters[me]) do items = items + 1; copies = copies + qty end
-        DWM:Print(L["MSG_AHPLAN_HOLDS"]:format(copies, items))
+        tostring(s.generated or "?"),
+        s.me or "?",
+        s.role and L["AHPLAN_ROLE_" .. s.role:upper()] or L["AHPLAN_ROLE_NONE"]))
+    if s.role == "poster" then
+        DWM:Print(L["MSG_AHPLAN_HOLDS"]:format(s.copies, s.items))
+    elseif s.role == "feeder" then
+        DWM:Print(L["MSG_AHPLAN_FEEDS"]:format(s.copies, s.items, s.guild or "?", s.pulled))
     end
     if not DWM.db.profile.ahPlanConfirmed then DWM:Print(L["MSG_AHPLAN_UNCONFIRMED"]) end
     local _, haveSyndicator = self:PendingCounts()
-    if not haveSyndicator then DWM:Print(L["MSG_AHPLAN_NOSYNDICATOR"]) end
+    if not haveSyndicator and s.role == "poster" then DWM:Print(L["MSG_AHPLAN_NOSYNDICATOR"]) end
 end

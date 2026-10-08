@@ -2,7 +2,9 @@
     Djinni's Warband Manager - AHPlanPanel (card 0002)
 
     The AH plan's window, so nobody has to remember /dwm commands. It opens by
-    itself when an AH character opens the plan's guild bank, and closes with it.
+    itself when an AH character opens the plan's guild bank, or a feeder opens
+    its storage guild bank (card 0004), and closes with it. At an ordinary
+    bank it opens only when the AH plan has moves there.
 
       * Two checkboxes: "Use the AH plan" (ahPlanEnabled) and "Move items by
         themselves" (ahPlanConfirmed). With the second one off, nothing moves
@@ -26,6 +28,7 @@ ns.AHPlanPanel = Panel
 local ROW_H = 22
 local frame, scrollBox, summaryText, hintText, enableCheck, autoCheck, moveBtn
 local editPreview = false   -- shown only because Edit Mode is open
+local CurrentKind, AHMoves  -- defined under Refresh, used by the buttons
 
 local function P() return DWM.db.profile end
 
@@ -184,8 +187,8 @@ local function Build()
     moveBtn:SetPoint("BOTTOMLEFT", 12, 12)
     moveBtn:SetText(L["AHPANEL_MOVE"])
     moveBtn:SetScript("OnClick", function()
-        local e = Engine()
-        if e then e:Run("panel", "guild") end
+        local e, kind = Engine(), CurrentKind()
+        if e and kind then e:Run("panel", kind) end
         Panel:Refresh()
     end)
 
@@ -194,7 +197,7 @@ local function Build()
     refresh:SetPoint("BOTTOMRIGHT", -12, 12)
     refresh:SetText(L["AHPANEL_REFRESH"])
     refresh:SetScript("OnClick", function()
-        if ns.guildBankOpen then
+        if CurrentKind() == "guild" then
             for tab = 1, (GetNumGuildBankTabs() or 0) do QueryGuildBankTab(tab) end
         end
         Panel:ScheduleTimer("Refresh", 1)
@@ -209,19 +212,40 @@ end
 -- Refresh
 --============================================================================
 
+-- Which bank the window works on now: "guild" at the guild bank this
+-- character's role uses, "warband" at an open bank, nil anywhere else.
+function CurrentKind()
+    if ns.guildBankOpen then
+        return (ns.AHPlan and ns.AHPlan:GuildRole()) and "guild" or nil
+    end
+    if ns.bankState == "ready" and DWM:IsWarbandUsable() then return "warband" end
+    return nil
+end
+
+-- The AH plan's moves at a bank: BuildPlan without purpose items (vellum).
+function AHMoves(kind)
+    local e = Engine()
+    if not e then return {}, {} end
+    local plan, warns = e:BuildPlan(kind)
+    local out = {}
+    for _, m in ipairs(plan) do if m.ah then out[#out + 1] = m end end
+    return out, warns
+end
+
 -- The moves to list, and the line above the list.
 local function Moves()
     local AHPlan = ns.AHPlan
     local s = AHPlan and AHPlan:Summary()
     if not s then return {}, L["MSG_AHPLAN_NODATA"] end
-    if not s.poster then return {}, L["AHPANEL_NOT_POSTER"] end
+    if not s.role then return {}, L["AHPANEL_NOT_POSTER"] end
     if not P().ahPlanEnabled then return {}, L["AHPANEL_OFF"] end
-    if not ns.guildBankOpen then return {}, L["AHPANEL_OPEN_GB"]:format(s.guild or "?") end
-    if not AHPlan:InTransportGuild() then return {}, L["AHPANEL_WRONG_GUILD"]:format(s.guild or "?") end
+    local kind = CurrentKind()
+    if ns.guildBankOpen and not kind then return {}, L["AHPANEL_WRONG_GUILD"]:format(s.guild or "?") end
+    if not kind then return {}, L["AHPANEL_OPEN_GB"]:format(s.guild or "?") end
     local e = Engine()
     if not e then return {}, "" end
     if e.session then return {}, L["AHPANEL_MOVING"]:format(e.session.moves or 0) end
-    local plan, warns = e:BuildPlan("guild")
+    local plan, warns = AHMoves(kind)
     local hint = (#plan == 0) and L["AHPANEL_NOTHING"] or L["AHPANEL_COUNT"]:format(#plan)
     if warns and warns[1] then hint = hint .. "  |cFFFFCC00" .. warns[1] .. "|r" end
     return plan, hint
@@ -230,7 +254,10 @@ end
 function Panel:Refresh()
     if not frame or not frame:IsShown() then return end
     local s = ns.AHPlan and ns.AHPlan:Summary()
-    if s and s.me then
+    if s and s.me and s.role == "feeder" then
+        summaryText:SetText(L["AHPANEL_SUMMARY_FEED"]:format(
+            s.me:match("^[^-]+") or s.me, s.copies, s.guild or "?", s.pulled, tostring(s.generated or "?")))
+    elseif s and s.me then
         summaryText:SetText(L["AHPANEL_SUMMARY"]:format(
             s.me:match("^[^-]+") or s.me, s.copies, s.items, tostring(s.generated or "?")))
     else
@@ -267,11 +294,23 @@ end
 
 -- Core, once the guild bank's tabs have had time to answer.
 function Panel:OnGuildBankReady()
-    if ns.AHPlan and ns.AHPlan:InTransportGuild() then self:Show() end
+    if ns.AHPlan and ns.AHPlan:GuildRole() then self:Show() end
 end
 
 function Panel:OnGuildBankClosed()
     if frame and frame:IsShown() and not editPreview then frame:Hide() end
+end
+
+-- Core, when the bank is open and the warband bank usable. Opens only when the
+-- AH plan has moves here, so an ordinary bank visit stays quiet.
+function Panel:OnBankReady()
+    if not (ns.AHPlan and ns.AHPlan:IsEnabled() and ns.AHPlan:Role()) then return end
+    if P().ahPlanConfirmed then return end   -- the bank-open run moves them itself
+    if #AHMoves("warband") > 0 then self:Show() end
+end
+
+function Panel:OnBankClosed()
+    if frame and frame:IsShown() and not editPreview and not ns.guildBankOpen then frame:Hide() end
 end
 
 -- ItemEngine: a session moved an item, finished, or stopped. Counts settle a
@@ -289,8 +328,10 @@ function Panel:GET_ITEM_INFO_RECEIVED() self:OnEngineChanged() end
 function Panel:GUILDBANKBAGSLOTS_CHANGED()
     if not Running() then self:OnEngineChanged() end
 end
+Panel.BAG_UPDATE_DELAYED = Panel.GUILDBANKBAGSLOTS_CHANGED
 
 function Panel:OnEnable()
     self:RegisterEvent("GET_ITEM_INFO_RECEIVED")
     self:RegisterEvent("GUILDBANKBAGSLOTS_CHANGED")
+    self:RegisterEvent("BAG_UPDATE_DELAYED")
 end

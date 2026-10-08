@@ -38,6 +38,13 @@ REACHABLE_STORAGE = {
 }
 # The one guild bank every AH character belongs to; the addon moves items through it.
 TRANSPORT_GUILD = "Anything for Profit"
+# Storage guild banks the AH characters cannot open, and the character who empties each one
+# into the warband bank, where the AH characters pick the items up (card 0004). Guild name as
+# GetGuildInfo returns it, without the realm.
+FEEDERS = {
+    "GUILD:Transmog DOESNT Sell-Shadowsong": ("Jinn-Shadowsong", "Transmog DOESNT Sell"),
+    "GUILD:Storinator-Aggra(Português)": ("Pouches-Aggra(Português)", "Storinator"),
+}
 
 # Connected realm groups: undermine id, TSM realm name used for AuctionDB, the AH character.
 GROUPS = {
@@ -224,8 +231,8 @@ for h in held:
 
 # Which character opens each storage guild bank (from Syndicator character details).
 OPENED_BY = {
-    "GUILD:Storinator-Aggra(Português)": "Pouches, then mail to Buyme",
-    "GUILD:Transmog DOESNT Sell-Shadowsong": "Shortnbitter (mail to Buyme) or Jinn (mail to What)",
+    "GUILD:Storinator-Aggra(Português)": "the addon: Pouches to the warband bank",
+    "GUILD:Transmog DOESNT Sell-Shadowsong": "the addon: Jinn to the warband bank",
     "GUILD:Anything for Profit-Ghostlands": "the addon, on any AH character",
     "WARBAND": "the addon, on any AH character",
 }
@@ -469,7 +476,21 @@ for g in GROUPS.values():
     for item_id, n in sorted(target[char].items()):
         lines.append(f"            [{item_id}] = {n}, -- {comment(names[item_id])}")
     lines.append("        },")
+lines.append("    },")
+
+# What each feeder takes out of its storage guild bank: every planned copy that sits there.
+feed = collections.defaultdict(collections.Counter)  # source -> itemID -> copies
+for r, c, t in moves:
+    if c[0] in FEEDERS and r["key"].startswith("i:"):
+        feed[c[0]][int(r["key"][2:])] += 1
+lines.append("    feeders = {")
+for src, (char, guild) in FEEDERS.items():
+    lines.append(f"        [{lua_str(char)}] = {{ guild = {lua_str(guild)}, items = {{")
+    for item_id, n in sorted(feed[src].items()):
+        lines.append(f"            [{item_id}] = {n}, -- {comment(names[item_id])}")
+    lines.append("        } },")
 lines += ["    },", "}", ""]
 with open(ARGS.plan, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(lines))
 print("plan written:", ARGS.plan, {c: sum(v.values()) for c, v in target.items()})
+print("feeders:", {FEEDERS[s][0]: sum(v.values()) for s, v in feed.items()})

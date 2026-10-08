@@ -196,6 +196,7 @@ local function ResetBankState()
     sawBanker = false
     uiReady = false
     ranThisOpen = false
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnBankClosed() end
 end
 
 function DWM:_TryTransitionReady()
@@ -213,6 +214,9 @@ function DWM:_TryTransitionReady()
     ns.bankState = "ready"
     if ranThisOpen then return end
     ranThisOpen = true
+    -- AH plan moves at the warband bank (a feeder's deposits, an AH
+    -- character's withdrawals) wait for the window's Move items button.
+    if ns.AHPlanPanel then ns.AHPlanPanel:OnBankReady() end
     self:Debug("bank: ready -> running balance/items/ledger")
 
     if not self.db.profile.enabled then return end
@@ -237,9 +241,10 @@ local GUILD_SETTLE = 1.5   -- seconds for QueryGuildBankTab replies before the f
 
 function DWM:_OnGuildBankOpened()
     ns.guildBankOpen = true
-    -- The AH plan window shows for any AH character here, plan on or off, so
-    -- the plan can be switched on from it (card 0002).
-    if not (ns.AHPlan and ns.AHPlan:InTransportGuild()) then return end
+    -- The AH plan window shows for an AH character at the transport guild
+    -- bank, or a feeder at its storage guild bank, plan on or off, so the plan
+    -- can be switched on from it (cards 0002, 0004).
+    if not (ns.AHPlan and ns.AHPlan:GuildRole()) then return end
     -- Tab contents are only known after a query; ask for every viewable tab,
     -- then act once the replies have had time to land.
     for tab = 1, (GetNumGuildBankTabs() or 0) do QueryGuildBankTab(tab) end

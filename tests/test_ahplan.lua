@@ -102,7 +102,7 @@ _G.PickupGuildBankItem = function(...) log("PickupGuildBankItem", ...) end
 _G.AutoStoreGuildBankItem = function(...) log("AutoStoreGuildBankItem", ...) end
 _G.SplitGuildBankItem = function(...) log("SplitGuildBankItem", ...) end
 _G.IsInGuild = function() return true end
-_G.GetGuildInfo = function() return "Anything for Profit" end
+_G.GetGuildInfo = function() return world.guildName or "Anything for Profit" end
 
 _G.issecretvalue = function(v) return v == nil and false or rawequal(v, SECRET) end
 _G.UnitName = function() return world.me:match("^(.-)%-") end
@@ -380,6 +380,55 @@ do
         "moves=" .. tostring(E.session and E.session.moves))
     E.session = nil
 end
+ns.guildBankOpen = false
+
+-- 13. Feeder (card 0004): Jinn takes planned copies out of Transmog DOESNT Sell, puts them in
+-- the warband bank, and never takes out more than the plan says, across visits.
+ns.AHPlanData.generated = "2026-10-08 10:30"
+ns.AHPlanData.feeders = { ["Jinn-Shadowsong"] = { guild = "Transmog DOESNT Sell", items = { [500] = 2 } } }
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "Jinn-Shadowsong"
+world.guildName = "Transmog DOESNT Sell"
+ns.guildBankOpen = true
+world.now = 200
+for _ = 1, 3 do put(world.guild[1], 500, 1) end
+do
+    local E = ns.ItemEngine
+    check("feeder: role", ns.AHPlan:Role() == "feeder" and ns.AHPlan:GuildRole() == "feeder")
+    local p = planOf("guild")
+    check("feeder: withdraws the planned 2 of 3", p[500] and p[500].dir == "withdraw" and p[500].amount == 2,
+        p[500] and (p[500].dir .. " " .. p[500].amount) or "nil")
+    check("feeder: nothing to deposit at the guild bank", not (p[500] and p[500].dir == "deposit"))
+
+    E:Run("panel", "guild")
+    local c = world.calls[#world.calls]
+    check("feeder: AutoStore from the guild bank", c and c.name == "AutoStoreGuildBankItem")
+    world.guild[c[1]][c[2]] = nil           -- the server moves it into the bags
+    put(world.bags[0], 500, 1)
+    E:_Step()
+    check("feeder: confirmed copy is counted as taken", ns.AHPlan:Pulled(500) == 1, "pulled=" .. ns.AHPlan:Pulled(500))
+    E.session = nil
+
+    -- At the warband bank the bag copy goes in, and the next guild visit wants only 1 more.
+    ns.guildBankOpen = false
+    p = planOf("warband")
+    check("feeder: deposits its bag copy at the warband bank", p[500] and p[500].dir == "deposit" and p[500].amount == 1)
+    world.bags[0] = {}
+    ns.guildBankOpen = true
+    p = planOf("guild")
+    check("feeder: second visit takes only the rest", p[500] and p[500].dir == "withdraw" and p[500].amount == 1)
+
+    -- Wrong guild: nothing at all.
+    world.guildName = "Anything for Profit"
+    check("feeder: other guild bank is not its job", ns.AHPlan:GuildRole() == nil and not ns.AHPlan:CanUseGuildBank())
+
+    -- A new plan build starts the count again.
+    ns.AHPlanData.generated = "2026-10-09 09:00"
+    check("feeder: new plan resets the count", ns.AHPlan:Pulled(500) == 0)
+end
+ns.AHPlanData.feeders = nil
+world.guildName = nil
 ns.guildBankOpen = false
 
 print(("%d passed, %d failed"):format(passed, failed))

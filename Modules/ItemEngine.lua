@@ -385,7 +385,17 @@ function ItemEngine:BuildPlan(kind)
         local dep  = canDep and not (spec.ah and kind == "warband")
 
         local dir, amount
-        if md == "depositall" then
+        if md == "feed" then
+            -- AH plan feeder (card 0004): take planned copies out of its
+            -- storage guild bank, put every bag copy into the warband bank.
+            if kind == "guild" then
+                if canWd and (spec.remaining or 0) > 0 then
+                    dir, amount = "withdraw", math.min(spec.remaining, wb)
+                end
+            elseif canDep and canMove > 0 then
+                dir, amount = "deposit", canMove
+            end
+        elseif md == "depositall" then
             if dep and canMove > 0 then dir, amount = "deposit", canMove end
         elseif md == "keepmin" then
             if dep and held > qty then dir, amount = "deposit", math.min(canMove, held - qty) end
@@ -401,6 +411,7 @@ function ItemEngine:BuildPlan(kind)
             plan[#plan + 1] = {
                 itemID = id, dir = dir, amount = amount,
                 have = have, wb = wb, qty = qty, mode = md,
+                ah = spec.ah, feed = spec.feed,
             }
             if dir == "deposit" and bankFreeApprox <= 0 then
                 warns[#warns + 1] = L[kind == "guild" and "MSG_ITEM_NO_GB_SPACE" or "MSG_ITEM_NO_WB_SPACE"]
@@ -593,9 +604,14 @@ function ItemEngine:_DoOneGuildMove(plan)
             end
         else -- withdraw
             local tab, gSlot, count = FindGuildStack(e.itemID)
-            DWM:Debug(("_DoOneGuildMove withdraw item:%d amount=%d -> tab=%s slot=%s count=%s")
-                :format(e.itemID, e.amount, tostring(tab), tostring(gSlot), tostring(count)))
-            if tab then
+            -- A full bag cannot take it: the server would refuse every try.
+            local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
+            DWM:Debug(("_DoOneGuildMove withdraw item:%d amount=%d -> tab=%s slot=%s count=%s bagSlot=%s")
+                :format(e.itemID, e.amount, tostring(tab), tostring(gSlot), tostring(count), tostring(dSlot)))
+            if tab and dBag then
+                local moved = math.min(count, e.amount)
+                -- A feeder's copy counts as taken out once the bags show it.
+                if self.session then self.session.lastFeed = e.feed and { e.itemID, moved } or nil end
                 if count <= e.amount then
                     AutoStoreGuildBankItem(tab, gSlot)
                     QueryGuildBankTab(tab)
@@ -603,20 +619,28 @@ function ItemEngine:_DoOneGuildMove(plan)
                     return true
                 end
                 if CursorBusy() then DWM:Debug("_DoOneGuildMove: cursor busy, defer"); return false end
-                local dBag, dSlot = FindEmptyDestSlot(PlayerBags())
-                if dBag then
-                    ClearCursor()
-                    SplitGuildBankItem(tab, gSlot, e.amount)
-                    C_Container.PickupContainerItem(dBag, dSlot)
-                    QueryGuildBankTab(tab)
-                    DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
-                    return true
-                end
+                ClearCursor()
+                SplitGuildBankItem(tab, gSlot, e.amount)
+                C_Container.PickupContainerItem(dBag, dSlot)
+                QueryGuildBankTab(tab)
+                DWM:LogTxn(L["MSG_LOG_ITEM_GUILD"]:format(L["ITEM_WITHDRAW"], e.amount, ItemName(e.itemID)))
+                return true
             end
         end
     end
     DWM:Debug("_DoOneGuildMove: nothing actionable (no stack / no slot / no withdrawals left)")
     return false
+end
+
+-- BuildPlan, minus the AH plan's entries when skipAH. A bank visit leaves AH
+-- plan items alone until "Move items by themselves" is ticked; the AH plan
+-- window lists them and its Move items button moves them.
+function ItemEngine:_Plan(kind, skipAH)
+    local plan, warns = self:BuildPlan(kind)
+    if not skipAH then return plan, warns end
+    local out = {}
+    for _, e in ipairs(plan) do if not e.ah then out[#out + 1] = e end end
+    return out, warns
 end
 
 -- Issue exactly ONE physical move toward the first actionable plan entry.
@@ -700,6 +724,7 @@ function ItemEngine:_Step()
                and (s.retries or 0) < GUILD_RETRIES and not BagsLocked() then
                 s.retries = (s.retries or 0) + 1
                 s.moves = s.moves - 1     -- the re-send below counts it again
+                s.lastFeed = nil          -- and records its feeder copy again
                 DWM:Debug("_Step: guild move dropped, re-sending (" .. s.retries .. ")")
                 s.awaiting = false
                 s.waitTicks = 0
@@ -714,6 +739,10 @@ function ItemEngine:_Step()
             s.waitTicks = 0
             s.retries = 0
             s.lastConfirmed = GetTime()
+            if s.lastFeed and ns.AHPlan then
+                ns.AHPlan:AddPulled(s.lastFeed[1], s.lastFeed[2])
+            end
+            s.lastFeed = nil
         end
     end
 
@@ -839,7 +868,12 @@ function ItemEngine:Run(reason, kind)
         return
     end
 
-    local plan, warns = self:BuildPlan(kind)
+    -- The AH plan (card 0001) has its own opt-in: it can move hundreds of
+    -- items that no purpose ever touched. Until "Move items by themselves"
+    -- is ticked, a bank visit leaves its items alone and the AH plan window's
+    -- list is the dry run (card 0002).
+    local skipAH = not fromPanel and not DWM.db.profile.ahPlanConfirmed
+    local plan, warns = self:_Plan(kind, skipAH)
     DWM:Debug("Run: BuildPlan -> " .. #plan .. " entr" .. (#plan == 1 and "y" or "ies"))
     for _, e in ipairs(plan) do
         DWM:Debug(("  plan: %s %d x item:%d (have %d, wb %d, qty %d, mode %s)")
@@ -851,18 +885,6 @@ function ItemEngine:Run(reason, kind)
     if not DWM.db.profile.itemFirstRunConfirmed and not simulate and not fromPanel then
         forcedSim = true
         DWM:Print(L["MSG_ITEM_FIRSTRUN"])
-    end
-    -- The AH plan (card 0001) has its own opt-in: it can move hundreds of
-    -- items that no purpose ever touched, so it dry-runs until confirmed.
-    if not forcedSim and not simulate and not fromPanel and not DWM.db.profile.ahPlanConfirmed then
-        local targets = ns.Purposes:ResolveItemsForCurrent()
-        for _, e in ipairs(plan) do
-            if targets[e.itemID] and targets[e.itemID].ah then
-                forcedSim = true
-                DWM:Print(L["MSG_AHPLAN_FIRSTRUN"])
-                break
-            end
-        end
     end
 
     if simulate or forcedSim then
@@ -896,7 +918,7 @@ function ItemEngine:Run(reason, kind)
 
     DWM:Debug("Run: starting session")
     self.session = {
-        iters = 0, moves = 0, verbose = verbose, kind = kind,
+        iters = 0, moves = 0, verbose = verbose, kind = kind, skipAH = skipAH,
         awaiting = false, waitTicks = 0, preSig = nil, cursorWaits = 0,
     }
     if not self._bucket then

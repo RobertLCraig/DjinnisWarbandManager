@@ -24,6 +24,12 @@
   Also in the options panel and the bank button's menu. Movable in Edit Mode.
 - The bank button's right-click now opens a menu (Options, AH plan window,
   Pause or Resume) instead of pausing at once.
+- **New: storage feeders.** A character in a storage guild that no AH
+  character can open (Jinn, Pouches) takes the planned items out of that
+  guild bank and puts them in the warband bank, where the AH characters pick
+  them up. The AH plan window opens at that guild bank, and at a bank when
+  there are AH plan moves.
+- A bank visit no longer prints the AH plan's dry run to chat.
 
 0.3.2:
 
