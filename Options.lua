@@ -985,7 +985,9 @@ function ns.SetupOptions()
             DWM:Print(L["CMD_HELP_ITEMS"]);    DWM:Print(L["CMD_HELP_ITEM"])
             DWM:Print(L["CMD_HELP_ITEMLIST"]); DWM:Print(L["CMD_HELP_LOG"])
             DWM:Print(L["CMD_HELP_LEDGER"]); DWM:Print(L["CMD_HELP_PURPOSEITEMPROF"])
-            DWM:Print(L["CMD_HELP_AHPLAN"])
+            DWM:Print(L["CMD_HELP_AHPLAN"]); DWM:Print(L["CMD_HELP_PETS"])
+        elseif input == "pets" then
+            if ns.PetScan then ns.PetScan:PrintReport() end
         else
             AceConfigCmd.HandleCommand(DWM, "dwm", ADDON_NAME, input)
         end

@@ -528,6 +528,36 @@ do
     ns.guildBankOpen = false
 end
 ns.AHPlanData.posters["What-Shadowsong"] = savedWhat
+
+-- 17. PetScan (card 0006): a guild bank pet cage gives a plain item 82800 link. The species comes
+-- from the tooltip data, else from the tooltip's name line; a cage neither read knows is kept as
+-- "none" so the report can say how many are missing.
+loadModule("Modules/PetScan.lua")
+reset(); freshDB()
+world.me = "Lostpets-Aggra(Português)"
+world.guildName = "Bank of Requirement"
+_G.time = os.time
+_G.C_TooltipInfo = { GetGuildBankItem = function(tab, slot)
+    local e = world.guild[tab][slot]
+    if not e then return nil end
+    return { battlePetSpeciesID = e.species, battlePetLevel = e.species and 25, battlePetBreedQuality = e.species and 3,
+             lines = { { leftText = e.petName } } }
+end }
+_G.C_PetJournal = { FindPetIDByName = function(n) if n == "Mr. Bigglesworth" then return 1234, "guid" end end }
+world.guild[1][1] = { id = 82800, count = 1, species = 868 }
+world.guild[1][2] = { id = 82800, count = 1, petName = "Mr. Bigglesworth" }
+world.guild[1][3] = { id = 82800, count = 1, petName = "Unknown" }
+world.guild[1][4] = { id = 1234, count = 5 }          -- not a pet: ignored
+do
+    ns.PetScan:ScanCurrentTab()
+    local rec = DWM.db.global.petScan and DWM.db.global.petScan["Bank of Requirement"]
+    local t = rec and rec.tabs[1] or {}
+    check("pets: species from the tooltip data", t[1] and t[1].species == 868 and t[1].level == 25 and t[1].how == "tooltip")
+    check("pets: species from the name line", t[2] and t[2].species == 1234 and t[2].how == "name")
+    check("pets: unread cage kept as none", t[3] and t[3].species == nil and t[3].how == "none")
+    check("pets: other items ignored", t[4] == nil)
+end
+world.guildName = nil
 ns.bankState = "closed"
 ns.AHPlanData.feeders = nil
 world.guildName = nil
