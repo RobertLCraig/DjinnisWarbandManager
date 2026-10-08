@@ -610,6 +610,55 @@ do
     check("pets: never go through the guild bank", g[-868] == nil)
     ns.guildBankOpen = false
 end
+
+-- 19. In flight (Lostpets, 2026-10-08): copies still on their way read as locked. The run waits for
+-- them, not one second but up to 10 with nothing landing, then says the game holds a lock.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "Lostpets-Aggra(Português)"
+world.guildName = "Bank of Requirement"
+ns.bankState = "ready"
+world.now = 1000
+local inFlight = cage(868); inFlight.locked = true
+put(world.bags[0], 82800, 1, inFlight)
+do
+    local E = ns.ItemEngine
+    DWM.printed = {}
+    E:Run("panel", "warband")
+    check("in flight: nothing sent, the run waits", E.session ~= nil and #world.calls == 0)
+    world.now = 1005; E:_Step()
+    check("in flight: still waiting after 5 s", E.session ~= nil)
+    world.now = 1011; E:_Step()
+    local said = false
+    for _, msg in ipairs(DWM.printed) do if msg == "MSG_ITEM_STALE_LOCK" then said = true end end
+    check("in flight: after 10 s with nothing landed, says to log out", E.session == nil and said)
+end
+
+-- 20. One move per frame, as TSM does: the first move goes now, the rest on the next frames.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "Lostpets-Aggra(Português)"
+world.guildName = "Bank of Requirement"
+ns.bankState = "ready"
+ns.AHPlanData.feeders["Lostpets-Aggra(Português)"].items = { [-868] = 3 }
+for _ = 1, 3 do put(world.bags[0], 82800, 1, cage(868)) end
+local frames = {}
+_G.C_Timer = { After = function(_, fn) frames[#frames + 1] = fn end }
+do
+    local E = ns.ItemEngine
+    E:Run("panel", "warband")
+    local function sent()
+        local n = 0
+        for _, c in ipairs(world.calls) do if c.name == "UseContainerItem" then n = n + 1 end end
+        return n
+    end
+    check("one per frame: only the first move goes at once", sent() == 1, "sent=" .. sent())
+    while #frames > 0 do table.remove(frames, 1)() end
+    check("one per frame: the rest follow on later frames", sent() == 3, "sent=" .. sent())
+    E:Abort("test")
+end
+_G.C_Timer = nil
+
 ns.AHPlanData.posters, ns.AHPlanData.feeders = savedPosters, savedFeeders
 world.guildName = nil
 

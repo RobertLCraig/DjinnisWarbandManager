@@ -670,6 +670,7 @@ ItemEngine.MoveText = MoveText
 local BATCH_MAX = 60        -- moves sent in one go
 local BATCH_TIMEOUT = 4     -- seconds to wait for a batch before re-planning
 local BATCH_STALLS = 3      -- batches in a row with nothing landed -> give up
+local LOCK_WAIT = 10        -- seconds to wait on copies in flight with none landing
 
 -- Empty slots in the given containers, in order: { {bag, slot}, ... }.
 local function EmptySlots(bags)
@@ -700,7 +701,7 @@ function ItemEngine:_BuildBatch(plan)
     local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
     DWM:Debug(("_BuildBatch: %d plan entries, %d empty warband slots, %d empty bag slots")
         :format(#plan, #wbEmpty, #bagEmpty))
-    local moves = {}
+    local moves, lockedTotal = {}, 0   -- locked: copies left behind because in flight
     for _, e in ipairs(plan) do
         local deposit = (e.dir == "deposit")
         local left = e.amount
@@ -742,9 +743,10 @@ function ItemEngine:_BuildBatch(plan)
         if left > 0 then
             DWM:Debug(("  item:%d %s %d left: %d stacks seen, %d locked, %d refused, %d no free slot")
                 :format(e.itemID, e.dir, left, seen, locked, refused, noSlot))
+            lockedTotal = lockedTotal + locked
         end
     end
-    return moves
+    return moves, lockedTotal
 end
 
 -- Has every move in the batch left its source slot? Returns done, landed
@@ -767,8 +769,27 @@ local function BatchState(batch)
     return done, landed, ok, allLocked
 end
 
+-- Send one batch move.
+local function SendMove(m)
+    ClearCursor()
+    if m.use and m.dir == "deposit" then
+        -- Blizzard's own warband deposit (BankFrame.lua): no cursor, and the
+        -- bank type sends it to the warband, not the character bank.
+        C_Container.UseContainerItem(m.bag, m.slot, nil, BANKTYPE_ACCOUNT, false)
+    elseif m.use then
+        C_Container.UseContainerItem(m.bag, m.slot)
+    else
+        C_Container.SplitContainerItem(m.bag, m.slot, m.n)
+        if GetCursorInfo() == "item" then
+            C_Container.PickupContainerItem(m.to[1], m.to[2])
+        end
+    end
+    ClearCursor()
+end
+
 function ItemEngine:_StepBatch()
     local s = self.session
+    if s.sending then return self:_Arm(0.25) end   -- still sending, one per frame
     if s.batch then
         local done, landed, ok, allLocked = BatchState(s.batch)
         if not done and GetTime() - s.batchAt < BATCH_TIMEOUT then return self:_Arm(0.25) end
@@ -811,40 +832,58 @@ function ItemEngine:_StepBatch()
     end
     s.cursorWaits = 0
 
-    local moves = self:_BuildBatch(plan)
+    -- Any copy that left since the last look is progress: restart the wait.
+    local left = 0
+    for _, e in ipairs(plan) do left = left + e.amount end
+    if s.planLeft and left < s.planLeft then s.lockSince = nil end
+    s.planLeft = left
+
+    local moves, locked = self:_BuildBatch(plan)
     if #moves == 0 then
-        -- A stack still in flight from the last batch cannot be picked yet.
-        if BagsLocked() and (s.lockWaits or 0) < MAX_WAIT then
-            s.lockWaits = (s.lockWaits or 0) + 1
-            return self:_Arm(0.5)
+        -- Copies still in flight read as locked and cannot be sent again
+        -- yet. Wait for them while copies keep landing, as TSM does; it never
+        -- gives up on a move in flight. Seen 2026-10-08 on Lostpets: the run
+        -- stopped after one second while pets were still arriving.
+        if locked > 0 then
+            s.lockSince = s.lockSince or GetTime()
+            if GetTime() - s.lockSince < LOCK_WAIT then return self:_Arm(0.5) end
+            DWM:Print(L["MSG_ITEM_STALE_LOCK"])
+            return self:_Finish("locked")
         end
         if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
         return self:_Finish("blocked")
     end
-    s.lockWaits = 0
+    s.lockSince = nil
 
-    for _, m in ipairs(moves) do
-        ClearCursor()
-        if m.use and m.dir == "deposit" then
-            -- Blizzard's own warband deposit (BankFrame.lua): no cursor, and
-            -- the bank type sends it to the warband, not the character bank.
-            C_Container.UseContainerItem(m.bag, m.slot, nil, BANKTYPE_ACCOUNT, false)
-        elseif m.use then
-            C_Container.UseContainerItem(m.bag, m.slot)
-        else
-            C_Container.SplitContainerItem(m.bag, m.slot, m.n)
-            if GetCursorInfo() == "item" then
-                C_Container.PickupContainerItem(m.to[1], m.to[2])
-            end
-        end
-        ClearCursor()
-    end
-    DWM:Debug(("_StepBatch: sent %d moves"):format(#moves))
+    DWM:Debug(("_StepBatch: sending %d moves"):format(#moves))
     local last = moves[#moves]
     s.current = MoveText(last.dir, last.n, last.itemID)
     s.batch, s.batchAt = moves, GetTime()
     if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
-    self:_Arm(0.25)
+
+    -- One move per frame, as TSM does (MoveThread yields after every
+    -- MoveSlot). Both stale-lock runs on 2026-10-08 came right after a batch
+    -- sent in one go: the server drops what arrives at once, and the dropped
+    -- items stay greyed out until a logout.
+    if C_Timer and C_Timer.After then
+        s.sending = true
+        local i = 0
+        local function nextMove()
+            if self.session ~= s then return end
+            i = i + 1
+            SendMove(moves[i])
+            if i < #moves then
+                C_Timer.After(0, nextMove)
+            else
+                s.sending, s.batchAt = false, GetTime()
+                self:_Arm(0.25)
+            end
+        end
+        nextMove()
+    else
+        for _, m in ipairs(moves) do SendMove(m) end
+        self:_Arm(0.25)
+    end
 end
 
 function ItemEngine:_Step()
