@@ -27,3 +27,9 @@ guild bank.
 - [ ] After a guild bank visit and a logout, a rebuild shows the items in the transport guild bank
       in `2-post-from-storage.csv` (or plans them to an AH character).
 - [ ] `build.ps1` warns when the transport guild bank reads as empty.
+
+## Comments
+
+**2026-10-08** Discarded: the premise was wrong. Rob had already withdrawn and posted the 42 items
+on What, Loamint and Hotwheel, and Syndicator's saved data shows them there (What 43, Loamint 20,
+Hotwheel 4 posted copies of those items). The guild bank really was empty. The rebuild was kept.
