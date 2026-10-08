@@ -49,5 +49,11 @@ bags, where the hyperlink carries the species.
 
 ## Comments
 
+**2026-10-08** Step 1 in game, Lostpets at Bank of Requirement: "6 tab(s) seen, 62 cages, 0 known.
+Read by link 0, tooltip 0, name 0, not read 62." No read works on a guild bank cage. Syndicator
+counted 122 at 13:39; the gap is not explained. Next: the fallback (cages out to bags, where the
+`battlepet:` hyperlink carries the species; Syndicator already holds 277 such bag links), or one
+more diagnostic round to learn why the reads fail. Waiting on Rob.
+
 **2026-10-08** Step 1 built. 60 offline checks pass; 4 new ones cover the tooltip read, the name
 read, a cage neither read knows, and a non-pet item ignored.
