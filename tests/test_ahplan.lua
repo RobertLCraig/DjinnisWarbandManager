@@ -55,7 +55,7 @@ _G.C_Container = {
     GetContainerItemID = function(bag, slot) local e = container(bag)[slot]; return e and e.id end,
     GetContainerItemInfo = function(bag, slot)
         local e = container(bag)[slot]
-        return e and { stackCount = e.count, isLocked = false, quality = 3, itemID = e.id }
+        return e and { stackCount = e.count, isLocked = e.locked or false, quality = 3, itemID = e.id }
     end,
     UseContainerItem = function(...) log("UseContainerItem", ...) end,
     PickupContainerItem = function(...) world.cursor = nil; log("PickupContainerItem", ...) end,
@@ -476,7 +476,7 @@ ns.AHPlanData.feeders = nil
 local savedWhat = ns.AHPlanData.posters["What-Shadowsong"]
 ns.AHPlanData.posters["What-Shadowsong"] = { [100] = 1, [200] = 2 }   -- ids already in the cached plan set
 for bag = 0, 4 do for slot = 1, 20 do put(world.bags[bag], 999, 1) end end   -- bags 0-4 full
-put(world.warband, 100, 1)              -- whole stack: right-click
+put(world.warband, 100, 1, { locked = true })   -- whole stack, reads as locked: still a right-click
 put(world.warband, 200, 5)              -- part stack: needs an empty slot, none free
 do
     local E = ns.ItemEngine

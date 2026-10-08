@@ -689,15 +689,21 @@ function ItemEngine:_BuildBatch(plan)
                 if C_Container.GetContainerItemID(bag, slot) == e.itemID then
                     seen = seen + 1
                     local info = SlotInfo(bag, slot)
-                    local ok = info and not info.isLocked
-                    if not ok then locked = locked + 1 end
+                    local count = info and info.stackCount or 0
+                    local n = math.min(count, left)
+                    -- Blizzard's right-click on a bank slot ignores isLocked
+                    -- (BankFrame.lua); only its stack split checks it. Seen in
+                    -- game 2026-10-08 on What: 13 warband items all read as
+                    -- locked with nothing moving, so a lock alone must not
+                    -- stop a whole-stack take-out.
+                    local whole = info and not deposit and n == count
+                    local ok = info and (whole or not info.isLocked)
+                    if info and info.isLocked then locked = locked + 1 end
                     if ok and deposit then
                         ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT)
                         if not ok then refused = refused + 1 end
                     end
-                    local count = info and info.stackCount or 0
-                    local n = math.min(count, left)
-                    local use = ok and not deposit and n == count
+                    local use = ok and whole
                     local to = ok and not use and table.remove(deposit and wbEmpty or bagEmpty, 1)
                     if ok and not use and not to then noSlot = noSlot + 1 end
                     if use or to then
