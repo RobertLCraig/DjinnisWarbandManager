@@ -152,6 +152,15 @@ end
 -- GetItemCount(itemID, includeBank, includeUses, includeReagentBank, includeAccountBank)
 function DWM:GetOnCharacterCount(itemID)
     if not itemID then return 0 end
+    if ns.IsPetKey(itemID) then   -- a caged pet's species key (Modules/PetKeys.lua)
+        local n = 0
+        for bag = 0, (NUM_BAG_SLOTS or 4) + 1 do
+            for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+                if ns.SlotKey(bag, slot) == itemID then n = n + 1 end
+            end
+        end
+        return n
+    end
     return C_Item.GetItemCount(itemID, false, false, false, false) or 0
 end
 

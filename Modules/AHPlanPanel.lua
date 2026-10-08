@@ -54,6 +54,7 @@ local function Engine() return DWM:GetModule("ItemEngine", true) end
 local function Running() local e = Engine(); return e and e.session ~= nil end
 
 local function ItemText(itemID)
+    if ns.IsPetKey(itemID) then return ns.KeyName(itemID) end   -- a caged pet (card 0006)
     local name = C_Item.GetItemNameByID(itemID)
     if not name then C_Item.RequestLoadItemDataByID(itemID) end
     return name or ("item:" .. itemID)
@@ -77,20 +78,24 @@ local function InitRow(row, e)
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         row:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetItemByID(self.itemID)
+            if ns.IsPetKey(self.itemID) then
+                GameTooltip:SetText(ns.KeyName(self.itemID))
+            else
+                GameTooltip:SetItemByID(self.itemID)
+            end
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     row.itemID = e.itemID
-    row.icon:SetTexture(C_Item.GetItemIconByID(e.itemID))
+    row.icon:SetTexture(ns.KeyIcon(e.itemID))
     local deposit = (e.dir == "deposit")
     local verb = deposit and ("|cFFFFCC00" .. L["AHPANEL_GIVE"] .. "|r")
                           or ("|cFF33FF66" .. L["AHPANEL_TAKE"] .. "|r")
     local after = deposit and (e.have - e.amount) or (e.have + e.amount)
     -- Copies taken beyond this character's own quantity go on to the guild bank.
     local carry = 0
-    if not deposit and e.ah and not e.feed then
+    if not deposit and e.ah and not e.feed and not ns.IsPetKey(e.itemID) then
         carry = math.min(e.amount, (e.held or e.have) + e.amount - (e.qty or 0))
     end
     local extra = carry > 0 and ("  |cFF66CCFF" .. L["AHPANEL_CARRY"]:format(carry) .. "|r") or ""

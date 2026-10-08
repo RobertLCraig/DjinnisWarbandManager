@@ -68,7 +68,10 @@ local function SlotInfo(bag, slot)
     return info
 end
 
+local SlotKey = ns.SlotKey   -- item ID, or -species for a caged pet (Core.lua)
+
 local function MaxStack(itemID)
+    if ns.IsPetKey(itemID) then return 1 end
     local s = select(8, C_Item.GetItemInfo(itemID))
     if not s then
         if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
@@ -78,8 +81,7 @@ local function MaxStack(itemID)
 end
 
 local function ItemName(itemID)
-    local n = C_Item.GetItemInfo(itemID)
-    return n or ("item:" .. tostring(itemID))   -- S13.12: never block on data
+    return ns.KeyName(itemID)   -- S13.12: never block on data
 end
 
 local BANKTYPE_GUILD = (Enum and Enum.BankType and Enum.BankType.Guild) or 1
@@ -114,7 +116,7 @@ local function WarbandCount(itemID)
     local n = 0
     for _, bag in ipairs(WarbandTabs()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            if C_Container.GetContainerItemID(bag, slot) == itemID then
+            if SlotKey(bag, slot) == itemID then
                 local info = SlotInfo(bag, slot)
                 n = n + ((info and info.stackCount) or 0)
             end
@@ -130,7 +132,7 @@ function ItemEngine:ScanWarband()
     local out = {}
     for _, bag in ipairs(WarbandTabs()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            local id = C_Container.GetContainerItemID(bag, slot)
+            local id = SlotKey(bag, slot)
             if id then
                 local info = SlotInfo(bag, slot)
                 out[id] = (out[id] or 0) + ((info and info.stackCount) or 0)
@@ -148,7 +150,7 @@ local function BagCounts(bankType)
     local inBags, movable = {}, {}
     for _, bag in ipairs(PlayerBags()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            local id = C_Container.GetContainerItemID(bag, slot)
+            local id = SlotKey(bag, slot)
             if id then
                 local info = SlotInfo(bag, slot)
                 local n = (info and info.stackCount) or 0
@@ -168,7 +170,7 @@ end
 local function FindPlayerStack(itemID, bankType)
     for _, bag in ipairs(PlayerBags()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            if C_Container.GetContainerItemID(bag, slot) == itemID then
+            if SlotKey(bag, slot) == itemID then
                 local info = SlotInfo(bag, slot)
                 if info and not info.isLocked and DepositEligible(bag, slot, info, bankType) then
                     return bag, slot, info.stackCount or 0
@@ -322,7 +324,9 @@ function ItemEngine:BuildPlan(kind)
 
     local ids = {}
     for id, spec in pairs(targets) do
-        if kind == "warband" or spec.ah then ids[#ids + 1] = id end
+        -- A pet in a guild bank cannot be told from any other pet, so pets
+        -- never go through the guild bank (card 0006).
+        if kind == "warband" or (spec.ah and not ns.IsPetKey(id)) then ids[#ids + 1] = id end
     end
     table.sort(ids)   -- deterministic order (S13.9)
 
@@ -353,7 +357,14 @@ function ItemEngine:BuildPlan(kind)
         local dep  = canDep and not (spec.ah and kind == "warband")
 
         local dir, amount
-        if md == "feed" then
+        if md == "feed" and spec.bagFeed then
+            -- A feeder whose stock is in its own bags (Lostpets' pets, card
+            -- 0006) puts in only the planned copies, and counts them as they
+            -- land, so a second visit does not put in more.
+            if kind == "warband" and canDep and canMove > 0 and (spec.remaining or 0) > 0 then
+                dir, amount = "deposit", math.min(canMove, spec.remaining)
+            end
+        elseif md == "feed" then
             -- AH plan feeder (card 0004): take planned copies out of its
             -- storage guild bank, put every bag copy into the warband bank.
             if kind == "guild" then
@@ -367,6 +378,10 @@ function ItemEngine:BuildPlan(kind)
             if dep and canMove > 0 then dir, amount = "deposit", canMove end
         elseif md == "keepmin" then
             if dep and held > qty then dir, amount = "deposit", math.min(canMove, held - qty) end
+        elseif spec.ah and kind == "warband" and ns.IsPetKey(id) then
+            -- A pet cannot be carried on through the guild bank, so a poster
+            -- takes only the pets it posts itself.
+            if held < qty and canWd then dir, amount = "withdraw", math.min(qty - held, wb) end
         elseif spec.ah and kind == "warband" then
             -- A sale item never waits in the warband bank (Rob, 2026-10-08).
             -- A poster takes every copy: its own to post, the rest to put in
@@ -386,7 +401,7 @@ function ItemEngine:BuildPlan(kind)
             plan[#plan + 1] = {
                 itemID = id, dir = dir, amount = amount,
                 have = have, wb = wb, qty = qty, mode = md,
-                ah = spec.ah, feed = spec.feed, held = held,
+                ah = spec.ah, feed = spec.feed, bagFeed = spec.bagFeed, held = held,
             }
             if dir == "deposit" and bankFreeApprox <= 0 then
                 warns[#warns + 1] = L[kind == "guild" and "MSG_ITEM_NO_GB_SPACE" or "MSG_ITEM_NO_WB_SPACE"]
@@ -480,7 +495,7 @@ function ItemEngine:_WarbandNeedsTidy()
     local stacksOf, totalOf = {}, {}
     for _, bag in ipairs(WarbandTabs()) do
         for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-            local id = C_Container.GetContainerItemID(bag, slot)
+            local id = SlotKey(bag, slot)
             if id and targets[id] then
                 local info = SlotInfo(bag, slot)
                 local c = (info and info.stackCount) or 0
@@ -692,7 +707,7 @@ function ItemEngine:_BuildBatch(plan)
         for _, bag in ipairs(deposit and PlayerBags() or WarbandTabs()) do
             for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
                 if left <= 0 or #moves >= BATCH_MAX then break end
-                if C_Container.GetContainerItemID(bag, slot) == e.itemID then
+                if SlotKey(bag, slot) == e.itemID then
                     seen = seen + 1
                     local info = SlotInfo(bag, slot)
                     local count = info and info.stackCount or 0
@@ -716,7 +731,8 @@ function ItemEngine:_BuildBatch(plan)
                     if ok and not to then noSlot = noSlot + 1 end
                     if to then
                         moves[#moves + 1] = { bag = bag, slot = slot, to = to, n = n, use = use,
-                                              endQty = count - n, itemID = e.itemID, dir = e.dir }
+                                              endQty = count - n, itemID = e.itemID, dir = e.dir,
+                                              bagFeed = e.bagFeed }
                         left = left - n
                     end
                 end
@@ -736,7 +752,7 @@ end
 local function BatchState(batch)
     local done, landed, ok, allLocked = true, 0, {}, true
     for _, m in ipairs(batch) do
-        local id = C_Container.GetContainerItemID(m.bag, m.slot)
+        local id = SlotKey(m.bag, m.slot)
         local info = id == m.itemID and SlotInfo(m.bag, m.slot) or nil
         local q = info and info.stackCount or 0
         if (info and info.isLocked) or q > m.endQty then
@@ -760,6 +776,7 @@ function ItemEngine:_StepBatch()
         -- move is not a move (seen 2026-10-08: "48 moves", none landed).
         s.moves = s.moves + #ok
         for _, m in ipairs(ok) do
+            if m.bagFeed and ns.AHPlan then ns.AHPlan:AddPulled(m.itemID, m.n) end
             DWM:LogTxn(L["MSG_LOG_ITEM"]:format(m.dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],
                 m.n, ItemName(m.itemID)))
         end

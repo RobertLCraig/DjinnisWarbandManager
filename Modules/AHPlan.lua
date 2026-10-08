@@ -142,11 +142,12 @@ function AHPlan:Summary()
 end
 
 -- Every item ID the plan covers, built once from the posters' lists.
-local planned
+local planned, plannedFrom
 local function PlannedSet()
-    if planned then return planned end
-    planned = {}
     local d = Data()
+    local stamp = d and d.posters
+    if planned and plannedFrom == stamp then return planned end
+    planned, plannedFrom = {}, stamp
     for _, list in pairs((d and d.posters) or {}) do
         for id in pairs(list) do planned[id] = true end
     end
@@ -164,7 +165,12 @@ function AHPlan:PendingCounts()
     for _, listName in ipairs({ "auctions", "mail" }) do
         for _, item in pairs(rec[listName] or {}) do
             if type(item) == "table" and item.itemID then
-                out[item.itemID] = (out[item.itemID] or 0) + (item.itemCount or 1)
+                -- A caged pet counts under its species key (card 0006).
+                local key = item.itemID
+                local species = key == ns.PET_CAGE and item.itemLink
+                    and tonumber(item.itemLink:match("battlepet:(%d+)"))
+                if species then key = -species end
+                out[key] = (out[key] or 0) + (item.itemCount or 1)
             end
         end
     end
@@ -173,7 +179,8 @@ end
 
 -- Item targets for the current character, in the ItemEngine's shape:
 -- poster  { [itemID] = { qty, mode = "exact", pending, ah = true } }
--- feeder  { [itemID] = { qty = 0, mode = "feed", remaining, ah = true, feed = true } }
+-- feeder  { [itemID] = { qty = 0, mode = "feed", remaining, ah = true, feed = true, bagFeed } }
+-- A caged pet's key is -species (Core.lua ns.SlotKey).
 -- Only items this character holds, has pending, or should hold or take out,
 -- so the engine scans a short list.
 function AHPlan:TargetsForCurrent()
@@ -181,10 +188,14 @@ function AHPlan:TargetsForCurrent()
     if not self:IsEnabled() then return out end
     local role = self:Role()
     if role == "feeder" then
-        for id, n in pairs(Data().feeders[self:CurrentFullName()].items or {}) do
+        local f = Data().feeders[self:CurrentFullName()]
+        for id, n in pairs(f.items or {}) do
             local remaining = math.max(0, n - self:Pulled(id))
-            if remaining > 0 or DWM:GetOnCharacterCount(id) > 0 then
-                out[id] = { qty = 0, mode = "feed", remaining = remaining, ah = true, feed = true }
+            if remaining > 0 or (not f.bags and DWM:GetOnCharacterCount(id) > 0) then
+                -- bags: the stock is in this character's own bags (Lostpets'
+                -- pets, card 0006), so only the planned copies go in.
+                out[id] = { qty = 0, mode = "feed", remaining = remaining, ah = true, feed = true,
+                            bagFeed = f.bags or nil }
             end
         end
         return out

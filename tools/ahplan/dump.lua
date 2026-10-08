@@ -39,6 +39,22 @@ for _, key in ipairs(chars) do
     walk(key, "void", c.void)
   end
 end
+-- Feeders whose stock sits in their own bags (card 0006): only caged pets, whose bag link carries
+-- the species that a guild bank cage does not. Owner "BAGS:<character>".
+local bagFeeders = {"Lostpets-Aggra(Português)"}
+local function walkPets(owner, t)
+  if type(t) ~= "table" then return end
+  if t.itemID then
+    if t.itemLink and t.itemLink:find("battlepet:", 1, true) then emit(owner, "bags", t) end
+    return
+  end
+  for _, v in pairs(t) do walkPets(owner, v) end
+end
+for _, key in ipairs(bagFeeders) do
+  local c = D.Characters[key]
+  if c then walkPets("BAGS:" .. key, c.bags) else io.stderr:write("missing " .. key .. "\n") end
+end
+
 -- Every guild bank with data, not only the AH characters' own guild: stock in a big storage
 -- guild can reach an AH character through the warband bank.
 for g, gd in pairs(D.Guilds) do walk("GUILD:" .. g, "guildbank", gd.bank) end

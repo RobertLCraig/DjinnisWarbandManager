@@ -35,6 +35,7 @@ REACHABLE_STORAGE = {
     "GUILD:Anything for Profit-Ghostlands",
     "GUILD:Storinator-Aggra(Português)",
     "GUILD:Transmog DOESNT Sell-Shadowsong",
+    "BAGS:Lostpets-Aggra(Português)",
 }
 # The one guild bank every AH character belongs to; the addon moves items through it.
 TRANSPORT_GUILD = "Anything for Profit"
@@ -44,6 +45,12 @@ TRANSPORT_GUILD = "Anything for Profit"
 FEEDERS = {
     "GUILD:Transmog DOESNT Sell-Shadowsong": ("Jinn-Shadowsong", "Transmog DOESNT Sell"),
     "GUILD:Storinator-Aggra(Português)": ("Pouches-Aggra(Português)", "Storinator"),
+}
+# Feeders whose stock sits in their own bags (card 0006): Lostpets took the pets out of Bank of
+# Requirement because a guild bank cage hides its species (Rob, 2026-10-08). dump.lua writes only
+# their caged pets, as owner "BAGS:<character>". The addon puts the planned pets into the warband.
+BAG_FEEDERS = {
+    "BAGS:Lostpets-Aggra(Português)": "Lostpets-Aggra(Português)",
 }
 
 # Connected realm groups: undermine id, TSM realm name used for AuctionDB, the AH character.
@@ -233,6 +240,7 @@ for h in held:
 OPENED_BY = {
     "GUILD:Storinator-Aggra(Português)": "the addon: Pouches to the warband bank",
     "GUILD:Transmog DOESNT Sell-Shadowsong": "the addon: Jinn to the warband bank",
+    "BAGS:Lostpets-Aggra(Português)": "the addon: Lostpets to the warband bank",
     "GUILD:Anything for Profit-Ghostlands": "the addon, on any AH character",
     "WARBAND": "the addon, on any AH character",
 }
@@ -240,6 +248,9 @@ OPENED_BY = {
 agg = collections.defaultdict(lambda: dict(n=0, where=collections.Counter(), name="", quality=0))
 for h in held:
     if h["bound"] or h["key"] in commodities or h["quality"] < 1:
+        continue
+    # A cage with no species (any guild bank, card 0006) cannot be priced or told apart.
+    if h["key"] == "i:82800":
         continue
     a = agg[h["key"]]
     a["n"] += h["count"]
@@ -440,18 +451,24 @@ for h in held:
 print("posted now", dict(posted))
 
 # ---------- plan file for the addon ----------
-# How many copies each AH character should hold (bags + posted + mail). Battle pets are left
-# out: every caged pet is item 82800, and the addon matches on item ID.
-target = collections.defaultdict(collections.Counter)  # char -> itemID -> copies
+# How many copies each AH character should hold (bags + posted + mail). A battle pet is keyed by
+# its species as a negative number (card 0006): every caged pet is item 82800, and the addon reads
+# the species from a bag slot's link. A pet copy in a guild bank has no species and never gets here.
+
+
+def plan_key(key):
+    kind, n = key.split(":")
+    return int(n) if kind == "i" else -int(n)
+
+
+target = collections.defaultdict(collections.Counter)  # char -> plan key -> copies
 names = {}
 for r, c in keeps:
-    if r["key"].startswith("i:"):
-        target[GROUPS[c[2]]["char"]][int(r["key"][2:])] += 1
-        names[int(r["key"][2:])] = r["name"]
+    target[GROUPS[c[2]]["char"]][plan_key(r["key"])] += 1
+    names[plan_key(r["key"])] = r["name"]
 for r, c, t in moves:
-    if r["key"].startswith("i:"):
-        target[GROUPS[t]["char"]][int(r["key"][2:])] += 1
-        names[int(r["key"][2:])] = r["name"]
+    target[GROUPS[t]["char"]][plan_key(r["key"])] += 1
+    names[plan_key(r["key"])] = r["name"]
 
 
 def lua_str(s):
@@ -482,10 +499,17 @@ lines.append("    },")
 feed = collections.defaultdict(collections.Counter)  # source -> itemID -> copies
 for r, c, t in moves:
     if c[0] in FEEDERS and r["key"].startswith("i:"):
-        feed[c[0]][int(r["key"][2:])] += 1
+        feed[c[0]][plan_key(r["key"])] += 1
+    elif c[0] in BAG_FEEDERS:
+        feed[c[0]][plan_key(r["key"])] += 1
 lines.append("    feeders = {")
 for src, (char, guild) in FEEDERS.items():
     lines.append(f"        [{lua_str(char)}] = {{ guild = {lua_str(guild)}, items = {{")
+    for item_id, n in sorted(feed[src].items()):
+        lines.append(f"            [{item_id}] = {n}, -- {comment(names[item_id])}")
+    lines.append("        } },")
+for src, char in BAG_FEEDERS.items():
+    lines.append(f"        [{lua_str(char)}] = {{ bags = true, items = {{")
     for item_id, n in sorted(feed[src].items()):
         lines.append(f"            [{item_id}] = {n}, -- {comment(names[item_id])}")
     lines.append("        } },")
@@ -493,4 +517,6 @@ lines += ["    },", "}", ""]
 with open(ARGS.plan, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(lines))
 print("plan written:", ARGS.plan, {c: sum(v.values()) for c, v in target.items()})
-print("feeders:", {FEEDERS[s][0]: sum(v.values()) for s, v in feed.items()})
+print("pets planned:", {c: sum(n for k, n in v.items() if k < 0) for c, v in target.items()})
+feed_owner = {s: FEEDERS[s][0] for s in FEEDERS} | BAG_FEEDERS
+print("feeders:", {feed_owner[s]: sum(v.values()) for s, v in feed.items()})

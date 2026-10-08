@@ -21,6 +21,7 @@ Core.lua
 Data\AHPlan.lua
 
 # Modules (Roster + Purposes before Balancer/Options - they resolve targets)
+Modules\PetKeys.lua
 Modules\Roster.lua
 Modules\Purposes.lua
 Modules\AHPlan.lua

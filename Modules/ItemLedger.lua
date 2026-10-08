@@ -142,7 +142,7 @@ function ItemLedger:BuildReport()
         end
         local supply  = wb + surplusSupply
         report[#report + 1] = {
-            id = id, name = (C_Item.GetItemInfo(id)) or ("item:" .. id),
+            id = id, name = ns.KeyName(id),
             warband = wb, demand = demand, supply = supply,
             shortBy = math.max(0, demand - supply),
             unknown = unknown,

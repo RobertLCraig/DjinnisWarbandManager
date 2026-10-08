@@ -48,6 +48,7 @@ local function ParseItemArgs(input)
 end
 
 local function ItemDisplayName(itemID)
+    if ns.IsPetKey(itemID) then return ns.KeyName(itemID) end   -- a caged pet (card 0006)
     local n = C_Item.GetItemInfo(itemID)
     if not n and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
     return n or ("item:" .. tostring(itemID))

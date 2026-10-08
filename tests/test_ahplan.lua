@@ -55,7 +55,8 @@ _G.C_Container = {
     GetContainerItemID = function(bag, slot) local e = container(bag)[slot]; return e and e.id end,
     GetContainerItemInfo = function(bag, slot)
         local e = container(bag)[slot]
-        return e and { stackCount = e.count, isLocked = e.locked or false, quality = 3, itemID = e.id }
+        return e and { stackCount = e.count, isLocked = e.locked or false, quality = 3, itemID = e.id,
+                       hyperlink = e.link or ("item:" .. e.id) }
     end,
     UseContainerItem = function(...) log("UseContainerItem", ...) end,
     PickupContainerItem = function(...) world.cursor = nil; log("PickupContainerItem", ...) end,
@@ -150,6 +151,7 @@ local function loadModule(path)
     local chunk = assert(loadfile(path))
     chunk("DjinnisWarbandManager", ns)
 end
+loadModule("Modules/PetKeys.lua")
 loadModule("Modules/Purposes.lua")
 loadModule("Modules/AHPlan.lua")
 loadModule("Modules/ItemEngine.lua")
@@ -543,7 +545,10 @@ _G.C_TooltipInfo = { GetGuildBankItem = function(tab, slot)
     return { battlePetSpeciesID = e.species, battlePetLevel = e.species and 25, battlePetBreedQuality = e.species and 3,
              lines = { { leftText = e.petName } } }
 end }
-_G.C_PetJournal = { FindPetIDByName = function(n) if n == "Mr. Bigglesworth" then return 1234, "guid" end end }
+_G.C_PetJournal = {
+    FindPetIDByName = function(n) if n == "Mr. Bigglesworth" then return 1234, "guid" end end,
+    GetPetInfoBySpeciesID = function(s) return "Pet " .. s, 1000 + s end,
+}
 world.guild[1][1] = { id = 82800, count = 1, species = 868 }
 world.guild[1][2] = { id = 82800, count = 1, petName = "Mr. Bigglesworth" }
 world.guild[1][3] = { id = 82800, count = 1, petName = "Unknown" }
@@ -562,6 +567,53 @@ ns.bankState = "closed"
 ns.AHPlanData.feeders = nil
 world.guildName = nil
 ns.guildBankOpen = false
+
+-- 18. Pets (card 0006): a caged pet is keyed by -species. Lostpets, a feeder whose pets sit in its
+-- bags, puts only the planned pets into the warband bank and counts them as they land. A poster
+-- takes only its own pets, and pets never go through the guild bank.
+local function cage(species) return { link = "|Hbattlepet:" .. species .. ":25:3:1:1:1:0|h[Pet]|h" } end
+local savedPosters, savedFeeders = ns.AHPlanData.posters, ns.AHPlanData.feeders
+ns.AHPlanData.posters = { ["What-Shadowsong"] = { [-868] = 1 } }
+ns.AHPlanData.feeders = { ["Lostpets-Aggra(Português)"] = { bags = true, items = { [-868] = 1 } } }
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "Lostpets-Aggra(Português)"
+world.guildName = "Bank of Requirement"
+ns.bankState = "ready"
+put(world.bags[0], 82800, 1, cage(868)); put(world.bags[0], 82800, 1, cage(868))
+put(world.bags[0], 82800, 1, cage(999))                    -- not planned: stays
+do
+    local p = planOf("warband")
+    check("pets: bag feeder puts in only the planned pet", p[-868] and p[-868].dir == "deposit"
+        and p[-868].amount == 1 and p[-999] == nil)
+    local E = ns.ItemEngine
+    E:Run("panel", "warband")
+    check("pets: one move sent", E.session and E.session.batch and #E.session.batch == 1)
+    world.bags[0][1] = nil                                  -- it lands
+    E:_Step()
+    check("pets: landed pet counted for the feeder", ns.AHPlan:Pulled(-868) == 1)
+    local p2 = planOf("warband")
+    check("pets: second visit puts in nothing more", p2[-868] == nil)
+end
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "What-Shadowsong"
+world.guildName = "Anything for Profit"
+ns.bankState = "ready"
+put(world.warband, 82800, 1, cage(868)); put(world.warband, 82800, 1, cage(868))
+do
+    local p = planOf("warband")
+    check("pets: poster takes only its own pets", p[-868] and p[-868].dir == "withdraw" and p[-868].amount == 1)
+    ns.bankState = "closed"
+    world.warband = {}
+    put(world.bags[0], 82800, 1, cage(868)); put(world.bags[0], 82800, 1, cage(868))
+    ns.guildBankOpen = true
+    local g = planOf("guild")
+    check("pets: never go through the guild bank", g[-868] == nil)
+    ns.guildBankOpen = false
+end
+ns.AHPlanData.posters, ns.AHPlanData.feeders = savedPosters, savedFeeders
+world.guildName = nil
 
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)
