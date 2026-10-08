@@ -49,3 +49,7 @@ slots free, so the run stopped "blocked". The cause of the missed free slot is n
 `BankFrame.lua` does), so the server picks the bag slot. A part stack still needs a free slot found
 first. `/dwm debug on` now prints the empty slot counts and, per item, why it made no move. 50
 offline checks pass.
+
+**2026-10-08** The new debug found the cause: all 13 warband slots read `isLocked`, with 60 free bag
+slots. Blizzard's bank right-click does not check `isLocked`, so whole-stack take-outs now ignore it
+too (505d946). Why the slots read locked is not known. Open check: do the 13 come out on What?
