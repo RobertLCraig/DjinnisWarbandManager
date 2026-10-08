@@ -722,32 +722,50 @@ function ItemEngine:_BuildBatch(plan)
     return moves
 end
 
--- Has every move in the batch left its source slot? Returns done, landed copies.
+-- Has every move in the batch left its source slot? Returns done, landed
+-- copies, the moves that landed, and whether every move still out is on a
+-- slot the game holds locked.
 local function BatchState(batch)
-    local done, landed = true, 0
+    local done, landed, ok, allLocked = true, 0, {}, true
     for _, m in ipairs(batch) do
         local id = C_Container.GetContainerItemID(m.bag, m.slot)
         local info = id == m.itemID and SlotInfo(m.bag, m.slot) or nil
         local q = info and info.stackCount or 0
         if (info and info.isLocked) or q > m.endQty then
             done = false
+            if not (info and info.isLocked) then allLocked = false end
         else
             landed = landed + m.n
+            ok[#ok + 1] = m
         end
     end
-    return done, landed
+    return done, landed, ok, allLocked
 end
 
 function ItemEngine:_StepBatch()
     local s = self.session
     if s.batch then
-        local done, landed = BatchState(s.batch)
+        local done, landed, ok, allLocked = BatchState(s.batch)
         if not done and GetTime() - s.batchAt < BATCH_TIMEOUT then return self:_Arm(0.25) end
         s.done = (s.done or 0) + landed
+        -- Count and log a move when it lands, not when it is sent: a refused
+        -- move is not a move (seen 2026-10-08: "48 moves", none landed).
+        s.moves = s.moves + #ok
+        for _, m in ipairs(ok) do
+            DWM:LogTxn(L["MSG_LOG_ITEM"]:format(m.dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],
+                m.n, ItemName(m.itemID)))
+        end
         s.stalls = (landed == 0) and (s.stalls or 0) + 1 or 0
         s.batch = nil
         if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
         if s.stalls >= BATCH_STALLS then
+            -- Every refused slot still locked: the server holds a stale lock
+            -- that /reload does not clear. Seen 2026-10-08 on What; logging
+            -- out for a few minutes cleared it.
+            if allLocked then
+                DWM:Print(L["MSG_ITEM_STALE_LOCK"])
+                return self:_Finish("locked")
+            end
             if s.verbose then DWM:Print(L["MSG_ITEM_BLOCKED"]) end
             return self:_Finish("stuck")
         end
@@ -790,11 +808,8 @@ function ItemEngine:_StepBatch()
             end
         end
         ClearCursor()
-        DWM:LogTxn(L["MSG_LOG_ITEM"]:format(m.dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],
-            m.n, ItemName(m.itemID)))
     end
     DWM:Debug(("_StepBatch: sent %d moves"):format(#moves))
-    s.moves = s.moves + #moves
     local last = moves[#moves]
     s.current = MoveText(last.dir, last.n, last.itemID)
     s.batch, s.batchAt = moves, GetTime()

@@ -282,7 +282,7 @@ local function Moves()
 end
 
 local STOP_REASON = {
-    stuck = "AHPANEL_WHY_STUCK", blocked = "AHPANEL_WHY_BLOCKED", cap = "AHPANEL_WHY_CAP",
+    stuck = "AHPANEL_WHY_STUCK", locked = "AHPANEL_WHY_LOCKED", blocked = "AHPANEL_WHY_BLOCKED", cap = "AHPANEL_WHY_CAP",
     cursor = "AHPANEL_WHY_CURSOR", combat = "AHPANEL_WHY_COMBAT",
 }
 

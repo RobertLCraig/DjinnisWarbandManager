@@ -489,7 +489,16 @@ do
     check("withdraw: whole stack is a right-click on the warband slot",
         #uses == 1 and uses[1][1] == WB_TAB and uses[1][2] == 1, "uses=" .. #uses)
     check("withdraw: part stack waits for a free bag slot", splits == 0, "splits=" .. splits)
-    E:Abort("test")
+
+    -- The server never lets the locked item go (stale lock, 2026-10-08): three stalled batches,
+    -- then stop and say to log out. A refused move is not counted.
+    DWM.printed = {}
+    local session = E.session
+    for _ = 1, 3 do world.now = (world.now or 0) + 5; E:_Step() end
+    local said = false
+    for _, msg in ipairs(DWM.printed) do if msg == "MSG_ITEM_STALE_LOCK" then said = true end end
+    check("stale lock: stops and says to log out", E.session == nil and said)
+    check("stale lock: refused moves not counted", session.moves == 0, "moves=" .. tostring(session.moves))
 end
 ns.AHPlanData.posters["What-Shadowsong"] = savedWhat
 ns.bankState = "closed"
