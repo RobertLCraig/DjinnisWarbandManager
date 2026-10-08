@@ -49,6 +49,14 @@ bags, where the hyperlink carries the species.
 
 ## Comments
 
+**2026-10-08** Rob took the cages out to Lostpets' bags by hand. Syndicator's 13:56 save holds 268
+caged pets in Lostpets' bags, all with species (57 kinds). Steps 2 and 3 built (5dfebe4) and the
+plan rebuilt (eae1241): 129 pets of 39 kinds are worth selling (100g or more), fed by Lostpets as a
+bag feeder. The rest stay with Lostpets. Rules: a pet is keyed by -species
+(`Modules/PetKeys.lua`); pets never go through the guild bank; a poster takes only its own pets
+from the warband; a bag feeder puts in only its planned copies and counts them as they land; a
+cage with no species is never planned. 66 offline checks pass. Open: the in-game run below.
+
 **2026-10-08** Step 1 in game, Lostpets at Bank of Requirement: "6 tab(s) seen, 62 cages, 0 known.
 Read by link 0, tooltip 0, name 0, not read 62." No read works on a guild bank cage. Syndicator
 counted 122 at 13:39; the gap is not explained. Next: the fallback (cages out to bags, where the

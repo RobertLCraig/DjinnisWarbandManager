@@ -36,6 +36,10 @@
 - A sale item never waits in the warband bank. An AH character there takes
   every planned copy, and puts the ones meant for others into the shared
   guild bank. The window marks them "for the guild bank".
+- **New: battle pets in the AH plan.** A caged pet is planned by its kind.
+  Lostpets puts the planned pets from its bags into the warband bank, and
+  each AH character takes its own. Pets never go through a guild bank,
+  because a guild bank does not show which pet is in a cage.
 - If the game holds items locked (greyed out), a run stops and says to log
   out for a few minutes. A /reload does not clear it.
 - The AH plan window shows a progress bar and what is moving, and says why
