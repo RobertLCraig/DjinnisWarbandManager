@@ -668,30 +668,49 @@ local function NormalBags()
     return t
 end
 
--- Turn plan entries into slot-to-slot moves: { bag, slot, to, n, endQty, itemID, dir }.
+-- Turn plan entries into moves: { bag, slot, to, n, endQty, itemID, dir, use }.
+-- A whole stack out of the warband bank is a right-click (use = true, as
+-- Blizzard's BankFrame does it): the server picks the bag slot, so no empty
+-- slot has to be found first. Seen in game 2026-10-08 on What: 13 single
+-- items found no target slot with 60 bag slots free. Only a part stack
+-- needs its own empty slot.
 function ItemEngine:_BuildBatch(plan)
     local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
+    DWM:Debug(("_BuildBatch: %d plan entries, %d empty warband slots, %d empty bag slots")
+        :format(#plan, #wbEmpty, #bagEmpty))
     local moves = {}
     for _, e in ipairs(plan) do
         local deposit = (e.dir == "deposit")
         local left = e.amount
+        local seen, locked, refused, noSlot = 0, 0, 0, 0
         for _, bag in ipairs(deposit and PlayerBags() or WarbandTabs()) do
             for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
                 if left <= 0 or #moves >= BATCH_MAX then break end
                 if C_Container.GetContainerItemID(bag, slot) == e.itemID then
+                    seen = seen + 1
                     local info = SlotInfo(bag, slot)
                     local ok = info and not info.isLocked
-                    if ok and deposit then ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT) end
-                    local to = ok and table.remove(deposit and wbEmpty or bagEmpty, 1)
-                    if to then
-                        local count = info.stackCount or 0
-                        local n = math.min(count, left)
-                        moves[#moves + 1] = { bag = bag, slot = slot, to = to, n = n,
+                    if not ok then locked = locked + 1 end
+                    if ok and deposit then
+                        ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT)
+                        if not ok then refused = refused + 1 end
+                    end
+                    local count = info and info.stackCount or 0
+                    local n = math.min(count, left)
+                    local use = ok and not deposit and n == count
+                    local to = ok and not use and table.remove(deposit and wbEmpty or bagEmpty, 1)
+                    if ok and not use and not to then noSlot = noSlot + 1 end
+                    if use or to then
+                        moves[#moves + 1] = { bag = bag, slot = slot, to = to or nil, n = n, use = use,
                                               endQty = count - n, itemID = e.itemID, dir = e.dir }
                         left = left - n
                     end
                 end
             end
+        end
+        if left > 0 then
+            DWM:Debug(("  item:%d %s %d left: %d stacks seen, %d locked, %d refused, %d no free slot")
+                :format(e.itemID, e.dir, left, seen, locked, refused, noSlot))
         end
     end
     return moves
@@ -756,9 +775,13 @@ function ItemEngine:_StepBatch()
 
     for _, m in ipairs(moves) do
         ClearCursor()
-        C_Container.SplitContainerItem(m.bag, m.slot, m.n)
-        if GetCursorInfo() == "item" then
-            C_Container.PickupContainerItem(m.to[1], m.to[2])
+        if m.use then
+            C_Container.UseContainerItem(m.bag, m.slot)
+        else
+            C_Container.SplitContainerItem(m.bag, m.slot, m.n)
+            if GetCursorInfo() == "item" then
+                C_Container.PickupContainerItem(m.to[1], m.to[2])
+            end
         end
         ClearCursor()
         DWM:LogTxn(L["MSG_LOG_ITEM"]:format(m.dir == "deposit" and L["ITEM_DEPOSIT"] or L["ITEM_WITHDRAW"],

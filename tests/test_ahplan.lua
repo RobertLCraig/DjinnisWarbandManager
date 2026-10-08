@@ -133,7 +133,7 @@ function DWM:NewModule(name)
     function m:CancelTimer() end
     return m
 end
-function DWM:Debug() end
+function DWM:Debug(m) if os.getenv("DBG") then print(m) end end
 function DWM:Print(msg) self.printed[#self.printed + 1] = msg end
 function DWM:LogTxn() end
 function DWM:IsWarbandUsable() return true end
@@ -464,6 +464,34 @@ do
     E:_Step()
     check("batch: done once every move landed", E.session == nil)
 end
+-- 15. Warband withdraw on a poster (What, 2026-10-08): a whole stack is a right-click, so it goes
+-- even when no empty bag slot is found. A part stack still needs its own empty slot.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "What-Shadowsong"
+world.guildName = "Anything for Profit"
+ns.bankState = "ready"
+ns.AHPlanData.feeders = nil
+
+local savedWhat = ns.AHPlanData.posters["What-Shadowsong"]
+ns.AHPlanData.posters["What-Shadowsong"] = { [100] = 1, [200] = 2 }   -- ids already in the cached plan set
+for bag = 0, 4 do for slot = 1, 20 do put(world.bags[bag], 999, 1) end end   -- bags 0-4 full
+put(world.warband, 100, 1)              -- whole stack: right-click
+put(world.warband, 200, 5)              -- part stack: needs an empty slot, none free
+do
+    local E = ns.ItemEngine
+    E:Run("panel", "warband")
+    local uses, splits = {}, 0
+    for _, c in ipairs(world.calls) do
+        if c.name == "UseContainerItem" then uses[#uses + 1] = c end
+        if c.name == "SplitContainerItem" then splits = splits + 1 end
+    end
+    check("withdraw: whole stack is a right-click on the warband slot",
+        #uses == 1 and uses[1][1] == WB_TAB and uses[1][2] == 1, "uses=" .. #uses)
+    check("withdraw: part stack waits for a free bag slot", splits == 0, "splits=" .. splits)
+    E:Abort("test")
+end
+ns.AHPlanData.posters["What-Shadowsong"] = savedWhat
 ns.bankState = "closed"
 ns.AHPlanData.feeders = nil
 world.guildName = nil
