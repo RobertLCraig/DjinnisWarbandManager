@@ -192,12 +192,10 @@ function AHPlan:TargetsForCurrent()
     if role ~= "poster" then return out end
     local mine = Data().posters[self:CurrentFullName()]
     local pending = self:PendingCounts()
+    -- Every planned item, even one planned only for another poster: a copy
+    -- of it in the warband bank must still come out (Rob, 2026-10-08).
     for id in pairs(PlannedSet()) do
-        local qty = mine[id] or 0
-        local pend = pending[id] or 0
-        if qty > 0 or pend > 0 or DWM:GetOnCharacterCount(id) > 0 then
-            out[id] = { qty = qty, mode = "exact", pending = pend, ah = true }
-        end
+        out[id] = { qty = mine[id] or 0, mode = "exact", pending = pending[id] or 0, ah = true }
     end
     return out
 end

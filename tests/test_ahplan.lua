@@ -464,8 +464,8 @@ do
     E:_Step()
     check("batch: done once every move landed", E.session == nil)
 end
--- 15. Warband withdraw on a poster (What, 2026-10-08): a whole stack is a right-click, so it goes
--- even when no empty bag slot is found. A part stack still needs its own empty slot.
+-- 15. Warband withdraw on a poster (What, 2026-10-08): a whole stack is a right-click, even when
+-- the slot reads locked, and a batch never sends more take-outs than there are free bag slots.
 reset(); freshDB()
 DWM.db.profile.enabled = true
 world.me = "What-Shadowsong"
@@ -476,8 +476,9 @@ ns.AHPlanData.feeders = nil
 local savedWhat = ns.AHPlanData.posters["What-Shadowsong"]
 ns.AHPlanData.posters["What-Shadowsong"] = { [100] = 1, [200] = 2 }   -- ids already in the cached plan set
 for bag = 0, 4 do for slot = 1, 20 do put(world.bags[bag], 999, 1) end end   -- bags 0-4 full
+world.bags[4][20] = nil                                                        -- but one free slot
 put(world.warband, 100, 1, { locked = true })   -- whole stack, reads as locked: still a right-click
-put(world.warband, 200, 5)              -- part stack: needs an empty slot, none free
+put(world.warband, 200, 5)                      -- no free slot left for it
 do
     local E = ns.ItemEngine
     E:Run("panel", "warband")
@@ -488,7 +489,7 @@ do
     end
     check("withdraw: whole stack is a right-click on the warband slot",
         #uses == 1 and uses[1][1] == WB_TAB and uses[1][2] == 1, "uses=" .. #uses)
-    check("withdraw: part stack waits for a free bag slot", splits == 0, "splits=" .. splits)
+    check("withdraw: no more take-outs than free bag slots", #uses + splits == 1, "splits=" .. splits)
 
     -- The server never lets the locked item go (stale lock, 2026-10-08): three stalled batches,
     -- then stop and say to log out. A refused move is not counted.
@@ -499,6 +500,32 @@ do
     for _, msg in ipairs(DWM.printed) do if msg == "MSG_ITEM_STALE_LOCK" then said = true end end
     check("stale lock: stops and says to log out", E.session == nil and said)
     check("stale lock: refused moves not counted", session.moves == 0, "moves=" .. tostring(session.moves))
+end
+
+-- 16. A sale item never waits in the warband bank (Rob, 2026-10-08): What takes every copy, its
+-- own and the ones planned for others, then puts the others' copies into the transport guild bank.
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "What-Shadowsong"
+world.guildName = "Anything for Profit"
+ns.bankState = "ready"
+ns.AHPlanData.posters["What-Shadowsong"] = { [200] = 1 }
+put(world.warband, 100, 2)      -- Buyme's item: none planned for What
+put(world.warband, 200, 3)      -- What keeps 1, carries 2
+do
+    local p = planOf("warband")
+    check("carry: takes another poster's copies out of the warband",
+        p[100] and p[100].dir == "withdraw" and p[100].amount == 2)
+    check("carry: takes every copy of its own item", p[200] and p[200].dir == "withdraw" and p[200].amount == 3)
+    ns.bankState = "closed"
+    world.warband = {}
+    put(world.bags[0], 100, 1); put(world.bags[0], 100, 1)
+    put(world.bags[1], 200, 1); put(world.bags[1], 200, 1); put(world.bags[1], 200, 1)
+    ns.guildBankOpen = true
+    local g = planOf("guild")
+    check("carry: guild bank gets the other poster's copies", g[100] and g[100].dir == "deposit" and g[100].amount == 2)
+    check("carry: guild bank gets what is over its own quantity", g[200] and g[200].dir == "deposit" and g[200].amount == 2)
+    ns.guildBankOpen = false
 end
 ns.AHPlanData.posters["What-Shadowsong"] = savedWhat
 ns.bankState = "closed"

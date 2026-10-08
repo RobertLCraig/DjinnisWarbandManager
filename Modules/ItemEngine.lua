@@ -367,6 +367,13 @@ function ItemEngine:BuildPlan(kind)
             if dep and canMove > 0 then dir, amount = "deposit", canMove end
         elseif md == "keepmin" then
             if dep and held > qty then dir, amount = "deposit", math.min(canMove, held - qty) end
+        elseif spec.ah and kind == "warband" then
+            -- A sale item never waits in the warband bank (Rob, 2026-10-08).
+            -- A poster takes every copy: its own to post, the rest to put in
+            -- the transport guild bank, where the exact branch below deposits
+            -- what is over its own quantity. Posters never deposit into the
+            -- warband, so nothing goes back and forth.
+            if canWd and wb > 0 then dir, amount = "withdraw", wb end
         else -- exact
             if held > qty then
                 if dep then dir, amount = "deposit", math.min(canMove, held - qty) end
@@ -379,7 +386,7 @@ function ItemEngine:BuildPlan(kind)
             plan[#plan + 1] = {
                 itemID = id, dir = dir, amount = amount,
                 have = have, wb = wb, qty = qty, mode = md,
-                ah = spec.ah, feed = spec.feed,
+                ah = spec.ah, feed = spec.feed, held = held,
             }
             if dir == "deposit" and bankFreeApprox <= 0 then
                 warns[#warns + 1] = L[kind == "guild" and "MSG_ITEM_NO_GB_SPACE" or "MSG_ITEM_NO_WB_SPACE"]
@@ -670,10 +677,9 @@ end
 
 -- Turn plan entries into moves: { bag, slot, to, n, endQty, itemID, dir, use }.
 -- A whole stack out of the warband bank is a right-click (use = true, as
--- Blizzard's BankFrame does it): the server picks the bag slot, so no empty
--- slot has to be found first. Seen in game 2026-10-08 on What: 13 single
--- items found no target slot with 60 bag slots free. Only a part stack
--- needs its own empty slot.
+-- Blizzard's BankFrame does it): the server picks the bag slot. It still
+-- counts one free bag slot, so a batch never sends more than the bags hold.
+-- A part stack goes to the free slot it was given.
 function ItemEngine:_BuildBatch(plan)
     local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
     DWM:Debug(("_BuildBatch: %d plan entries, %d empty warband slots, %d empty bag slots")
@@ -703,11 +709,13 @@ function ItemEngine:_BuildBatch(plan)
                         ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT)
                         if not ok then refused = refused + 1 end
                     end
+                    -- A right-click still takes one free bag slot from the
+                    -- count, so a batch never sends more than the bags hold.
                     local use = ok and whole
-                    local to = ok and not use and table.remove(deposit and wbEmpty or bagEmpty, 1)
-                    if ok and not use and not to then noSlot = noSlot + 1 end
-                    if use or to then
-                        moves[#moves + 1] = { bag = bag, slot = slot, to = to or nil, n = n, use = use,
+                    local to = ok and table.remove(deposit and wbEmpty or bagEmpty, 1)
+                    if ok and not to then noSlot = noSlot + 1 end
+                    if to then
+                        moves[#moves + 1] = { bag = bag, slot = slot, to = to, n = n, use = use,
                                               endQty = count - n, itemID = e.itemID, dir = e.dir }
                         left = left - n
                     end

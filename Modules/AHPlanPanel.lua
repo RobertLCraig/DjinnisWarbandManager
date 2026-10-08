@@ -88,8 +88,14 @@ local function InitRow(row, e)
     local verb = deposit and ("|cFFFFCC00" .. L["AHPANEL_GIVE"] .. "|r")
                           or ("|cFF33FF66" .. L["AHPANEL_TAKE"] .. "|r")
     local after = deposit and (e.have - e.amount) or (e.have + e.amount)
-    row.text:SetText(("%s %d x %s  |cFFAAAAAA(%d -> %d)|r"):format(
-        verb, e.amount, ItemText(e.itemID), e.have, after))
+    -- Copies taken beyond this character's own quantity go on to the guild bank.
+    local carry = 0
+    if not deposit and e.ah and not e.feed then
+        carry = math.min(e.amount, (e.held or e.have) + e.amount - (e.qty or 0))
+    end
+    local extra = carry > 0 and ("  |cFF66CCFF" .. L["AHPANEL_CARRY"]:format(carry) .. "|r") or ""
+    row.text:SetText(("%s %d x %s  |cFFAAAAAA(%d -> %d)|r%s"):format(
+        verb, e.amount, ItemText(e.itemID), e.have, after, extra))
 end
 
 local function MakeCheck(label, tip, anchor, x, y, onClick)
