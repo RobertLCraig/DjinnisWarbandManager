@@ -69,5 +69,11 @@ stopped with the log-out message. Third stale-lock run; each came after many mov
 which points at a server rate limit, not proven. Fix a390f8e: the run records every
 `UI_ERROR_MESSAGE` and prints it at the end, and never re-sends a slot it already sent from while
 that slot is locked. Next: read the game's refusal text from the next stuck run.
+**2026-10-09** Loamint: 44 pet take-outs. The debug slot counts show 38 landed (bag empties 130 to
+92), but the window said "Stopped after 20 of 44": copies that land after their batch timed out were
+never counted. Pets reached the bags about 12 s after sending. The game said "Internal Bag Error"
+twice, on two single re-sends. 6 pets stayed locked and the run stopped at the 10 s wait. Fix: progress
+is now the plan total minus what the plan still needs, and the wait is 20 s. Open check: does a second
+press, a minute later, move the last few?
 **Open risk:** the locks may have come from our own 74-move batch just before. If greyed items show
 up again after a big batch, cut `BATCH_MAX` in `Modules/ItemEngine.lua`.

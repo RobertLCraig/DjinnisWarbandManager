@@ -623,7 +623,7 @@ do
 end
 
 -- 19. In flight (Lostpets, 2026-10-08): copies still on their way read as locked. The run waits for
--- them, not one second but up to 10 with nothing landing, then says the game holds a lock.
+-- them, not one second but up to 20 with nothing landing, then says the game holds a lock.
 reset(); freshDB()
 DWM.db.profile.enabled = true
 world.me = "Lostpets-Aggra(Português)"
@@ -637,12 +637,12 @@ do
     DWM.printed = {}
     E:Run("panel", "warband")
     check("in flight: nothing sent, the run waits", E.session ~= nil and #world.calls == 0)
-    world.now = 1005; E:_Step()
-    check("in flight: still waiting after 5 s", E.session ~= nil)
-    world.now = 1011; E:_Step()
+    world.now = 1015; E:_Step()
+    check("in flight: still waiting after 15 s", E.session ~= nil)
+    world.now = 1021; E:_Step()
     local said = false
     for _, msg in ipairs(DWM.printed) do if msg == "MSG_ITEM_STALE_LOCK" then said = true end end
-    check("in flight: after 10 s with nothing landed, says to log out", E.session == nil and said)
+    check("in flight: after 20 s with nothing landed, says to log out", E.session == nil and said)
 end
 
 -- 20. One move per frame, as TSM does: the first move goes now, the rest on the next frames.

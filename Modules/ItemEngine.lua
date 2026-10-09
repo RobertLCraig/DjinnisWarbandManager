@@ -674,7 +674,8 @@ ItemEngine.MoveText = MoveText
 local BATCH_MAX = 60        -- moves sent in one go
 local BATCH_TIMEOUT = 4     -- seconds to wait for a batch before re-planning
 local BATCH_STALLS = 3      -- batches in a row with nothing landed -> give up
-local LOCK_WAIT = 10        -- seconds to wait on copies in flight with none landing
+local LOCK_WAIT = 20        -- seconds to wait on copies in flight with none landing
+                            -- (pets reached the bags 12 s after sending, 2026-10-09)
 
 -- Empty slots in the given containers, in order: { {bag, slot}, ... }.
 local function EmptySlots(bags)
@@ -831,6 +832,11 @@ function ItemEngine:_StepBatch()
     s.iters = s.iters + 1
     if s.iters > ITER_CAP then return self:_Finish("cap") end
     local plan = self:_Plan(s.kind, s.skipAH)
+    -- Copies that land after their batch timed out still count. Seen
+    -- 2026-10-09 on Loamint: 38 of 44 pets arrived, the window said 20.
+    local left = 0
+    for _, e in ipairs(plan) do left = left + e.amount end
+    if s.total and s.total - left > (s.done or 0) then s.done = s.total - left end
     if #plan == 0 then return self:_Finish("done") end
     if CursorBusy() then
         s.cursorWaits = (s.cursorWaits or 0) + 1
@@ -843,8 +849,6 @@ function ItemEngine:_StepBatch()
     s.cursorWaits = 0
 
     -- Any copy that left since the last look is progress: restart the wait.
-    local left = 0
-    for _, e in ipairs(plan) do left = left + e.amount end
     if s.planLeft and left < s.planLeft then s.lockSince = nil end
     s.planLeft = left
 
