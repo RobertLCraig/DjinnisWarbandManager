@@ -63,5 +63,11 @@ landing, and many pets went grey. TSM's `MoveThread` yields a frame after every 
 up on a move in flight; this addon sent the whole batch in one go. Fix aac223c: one move per frame,
 and a wait on copies in flight that restarts whenever one lands (10 s with nothing landing, then
 the log-out message). Whole-stack deposits now use Blizzard's warband deposit call (d92ffc7).
+**2026-10-09** What: 55 guild bank withdraws worked (some dropped and re-sent). Then at the warband
+bank, 19 take-outs (6 pets, 13 items) were sent one per frame, three times, and none landed; the run
+stopped with the log-out message. Third stale-lock run; each came after many moves in a short time,
+which points at a server rate limit, not proven. Fix a390f8e: the run records every
+`UI_ERROR_MESSAGE` and prints it at the end, and never re-sends a slot it already sent from while
+that slot is locked. Next: read the game's refusal text from the next stuck run.
 **Open risk:** the locks may have come from our own 74-move batch just before. If greyed items show
 up again after a big batch, cut `BATCH_MAX` in `Modules/ItemEngine.lua`.
