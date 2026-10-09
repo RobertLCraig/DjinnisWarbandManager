@@ -523,6 +523,10 @@ function ItemEngine:_Finish(reason)
     local s = self.session
     DWM:Debug(("_Finish reason=%s moves=%d iters=%d"):format(
         tostring(reason), s.moves or 0, s.iters or 0))
+    -- What the game said when it refused moves, so a stuck run has a reason.
+    for message, n in pairs(s.errors or {}) do
+        DWM:Print(L["MSG_ITEM_GAME_SAID"]:format(n, message))
+    end
     self.session = nil
     if self._bucket then self:UnregisterBucket(self._bucket); self._bucket = nil end
     if self._wd then self:CancelTimer(self._wd); self._wd = nil end
@@ -698,6 +702,7 @@ end
 -- slot, so a batch never sends more than the other side holds. A part stack
 -- goes to the free slot it was given, through the cursor.
 function ItemEngine:_BuildBatch(plan)
+    local sent = self.session and self.session.sentSlots   -- "bag:slot" sent from this run
     local wbEmpty, bagEmpty = EmptySlots(WarbandTabs()), EmptySlots(NormalBags())
     DWM:Debug(("_BuildBatch: %d plan entries, %d empty warband slots, %d empty bag slots")
         :format(#plan, #wbEmpty, #bagEmpty))
@@ -718,9 +723,14 @@ function ItemEngine:_BuildBatch(plan)
                     -- (BankFrame.lua); only its stack split checks it. Seen in
                     -- game 2026-10-08 on What: 13 warband items all read as
                     -- locked with nothing moving, so a lock alone must not
-                    -- stop a whole-stack take-out.
+                    -- stop a whole-stack take-out. But a slot this run already
+                    -- sent from is never sent again while it is locked: the
+                    -- move is in flight or the server dropped it, and a re-send
+                    -- does not help (seen 2026-10-09: 19 moves sent 3 times,
+                    -- none landed).
                     local whole = info and n == count
-                    local ok = info and ((whole and not deposit) or not info.isLocked)
+                    local sentHere = sent and sent[bag .. ":" .. slot]
+                    local ok = info and ((whole and not deposit and not sentHere) or not info.isLocked)
                     if info and info.isLocked then locked = locked + 1 end
                     if ok and deposit then
                         ok = DepositEligible(bag, slot, info, BANKTYPE_ACCOUNT)
@@ -839,6 +849,8 @@ function ItemEngine:_StepBatch()
     s.planLeft = left
 
     local moves, locked = self:_BuildBatch(plan)
+    s.sentSlots = s.sentSlots or {}
+    for _, m in ipairs(moves) do s.sentSlots[m.bag .. ":" .. m.slot] = true end
     if #moves == 0 then
         -- Copies still in flight read as locked and cannot be sent again
         -- yet. Wait for them while copies keep landing, as TSM does; it never
@@ -1110,5 +1122,21 @@ function ItemEngine:Run(reason, kind)
             { "BAG_UPDATE_DELAYED", "PLAYER_ACCOUNT_BANK_TAB_SLOTS_CHANGED", "GUILDBANKBAGSLOTS_CHANGED" },
             0.3, "_OnBankChanged")
     end
+    -- The server's reason for a refused move arrives as a UI error. Recorded
+    -- per run and printed at the end, because three runs on 2026-10-08 sent
+    -- moves that never landed and left the items greyed out, with no reason
+    -- known (card 0005).
+    if not self._errorsHooked then
+        self:RegisterEvent("UI_ERROR_MESSAGE", "_OnUIError")
+        self._errorsHooked = true
+    end
     self:_Step()
+end
+
+function ItemEngine:_OnUIError(_, _, message)
+    local s = self.session
+    if not s or type(message) ~= "string" or (issecretvalue and issecretvalue(message)) then return end
+    s.errors = s.errors or {}
+    s.errors[message] = (s.errors[message] or 0) + 1
+    DWM:Debug("game error during a move: " .. message)
 end

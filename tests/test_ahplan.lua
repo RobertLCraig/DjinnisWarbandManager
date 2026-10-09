@@ -129,6 +129,7 @@ ns.Roster = { Current = function() return { purpose = "Default" } end }
 function DWM:NewModule(name)
     local m = {}
     function m:RegisterBucketEvent() return {} end
+    function m:RegisterEvent() end
     function m:UnregisterBucket() end
     function m:ScheduleTimer() return {} end
     function m:CancelTimer() end
@@ -478,7 +479,7 @@ ns.AHPlanData.posters["What-Shadowsong"] = { [100] = 1, [200] = 2 }   -- ids alr
 for bag = 0, 4 do for slot = 1, 20 do put(world.bags[bag], 999, 1) end end   -- bags 0-4 full
 world.bags[4][20] = nil                                                        -- but one free slot
 put(world.warband, 100, 1, { locked = true })   -- whole stack, reads as locked: still a right-click
-put(world.warband, 200, 5)                      -- no free slot left for it
+put(world.warband, 200, 5, { locked = true })   -- no free slot left for it
 do
     local E = ns.ItemEngine
     E:Run("panel", "warband")
@@ -495,7 +496,17 @@ do
     -- then stop and say to log out. A refused move is not counted.
     DWM.printed = {}
     local session = E.session
-    for _ = 1, 3 do world.now = (world.now or 0) + 5; E:_Step() end
+    local resent = 0
+    for _ = 1, 8 do
+        if E.session then
+            world.calls = {}
+            world.now = (world.now or 0) + 5; E:_Step()
+            for _, c in ipairs(world.calls) do
+                if c.name == "UseContainerItem" and c[2] == 1 then resent = resent + 1 end
+            end
+        end
+    end
+    check("stale lock: a slot sent from is never sent again", resent == 0, "resent=" .. resent)
     local said = false
     for _, msg in ipairs(DWM.printed) do if msg == "MSG_ITEM_STALE_LOCK" then said = true end end
     check("stale lock: stops and says to log out", E.session == nil and said)
