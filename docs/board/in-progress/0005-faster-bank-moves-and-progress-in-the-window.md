@@ -75,5 +75,10 @@ never counted. Pets reached the bags about 12 s after sending. The game said "In
 twice, on two single re-sends. 6 pets stayed locked and the run stopped at the 10 s wait. Fix: progress
 is now the plan total minus what the plan still needs, and the wait is 20 s. Open check: does a second
 press, a minute later, move the last few?
+**2026-10-10** Jinn: 85 guild withdraws, then warband deposits stopped after 51 of 85 with 34
+copies greyed out in the bags and one "Internal Bag Error". Fourth stale-lock run, each at the tail of
+a fast burst, and only one refusal for 34 stuck copies, so the server mostly stays silent. Change:
+sends are now 0.2 s apart (`SEND_GAP`), about 5 a second, not one per frame. Open check: does a run
+of 50+ moves finish with nothing greyed out? If yes, try 0.1 s.
 **Open risk:** the locks may have come from our own 74-move batch just before. If greyed items show
 up again after a big batch, cut `BATCH_MAX` in `Modules/ItemEngine.lua`.

@@ -674,6 +674,9 @@ ItemEngine.MoveText = MoveText
 local BATCH_MAX = 60        -- moves sent in one go
 local BATCH_TIMEOUT = 4     -- seconds to wait for a batch before re-planning
 local BATCH_STALLS = 3      -- batches in a row with nothing landed -> give up
+local SEND_GAP = 0.2        -- seconds between two sends. One per frame left the last
+                            -- copies greyed out until a logout on four runs (2026-10-08 to
+                            -- 10-10: What, Loamint, Lostpets, Jinn), each after a fast burst.
 local LOCK_WAIT = 20        -- seconds to wait on copies in flight with none landing
                             -- (pets reached the bags 12 s after sending, 2026-10-09)
 
@@ -877,10 +880,10 @@ function ItemEngine:_StepBatch()
     s.batch, s.batchAt = moves, GetTime()
     if ns.AHPlanPanel then ns.AHPlanPanel:OnEngineChanged() end
 
-    -- One move per frame, as TSM does (MoveThread yields after every
-    -- MoveSlot). Both stale-lock runs on 2026-10-08 came right after a batch
-    -- sent in one go: the server drops what arrives at once, and the dropped
-    -- items stay greyed out until a logout.
+    -- One move every SEND_GAP seconds. Sent in one go, or one per frame as
+    -- TSM does (MoveThread yields after every MoveSlot), the server dropped
+    -- the tail of the run and the dropped items stayed greyed out until a
+    -- logout. A rate limit is the theory; it is not proven.
     if C_Timer and C_Timer.After then
         s.sending = true
         local i = 0
@@ -889,7 +892,7 @@ function ItemEngine:_StepBatch()
             i = i + 1
             SendMove(moves[i])
             if i < #moves then
-                C_Timer.After(0, nextMove)
+                C_Timer.After(SEND_GAP, nextMove)
             else
                 s.sending, s.batchAt = false, GetTime()
                 self:_Arm(0.25)
