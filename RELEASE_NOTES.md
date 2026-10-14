@@ -10,8 +10,9 @@
 
 # Release Notes
 
-## Version: 0.4.0
+## Version: 0.4.1
 
+- Updated for patch 12.1.5.
 - **New: AH plan (off by default).** Spreads auction stock across your
   auction-house characters. A script outside the game
   (`tools/ahplan/build.ps1`) reads your saved data, TSM prices and history,
