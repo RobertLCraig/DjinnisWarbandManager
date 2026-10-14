@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120105
 ## Title: Djinni's Warband Manager
 ## Notes: Balance gold and items toward per-character targets, and spread auction stock across your AH characters.
 ## Author: Djinni
