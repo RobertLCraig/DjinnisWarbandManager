@@ -573,6 +573,7 @@ function ItemEngine:_NoteGuildMove(dir, n, itemID)
         n, ItemName(itemID)))
     if self.session then
         self.session.lastAmount = n
+        self.session.lastItem = itemID
         self.session.current = ItemEngine.MoveText(dir, n, itemID)
     end
 end
@@ -642,9 +643,13 @@ end
 -- window lists them and its Move items button moves them.
 function ItemEngine:_Plan(kind, skipAH)
     local plan, warns = self:BuildPlan(kind)
-    if not skipAH then return plan, warns end
+    -- Items the game refused for this run (a unique item already held).
+    local skip = self.session and self.session.skipItems
+    if not skipAH and not skip then return plan, warns end
     local out = {}
-    for _, e in ipairs(plan) do if not e.ah then out[#out + 1] = e end end
+    for _, e in ipairs(plan) do
+        if not (skipAH and e.ah) and not (skip and skip[e.itemID]) then out[#out + 1] = e end
+    end
     return out, warns
 end
 
@@ -1140,10 +1145,33 @@ function ItemEngine:Run(reason, kind)
     self:_Step()
 end
 
-function ItemEngine:_OnUIError(_, _, message)
+-- The error's name, such as "ERR_ITEM_MAX_COUNT", which does not depend on the
+-- game's language (as Blizzard_UIErrorsFrame reads it).
+local function ErrorName(messageType)
+    if not GetGameMessageInfo or type(messageType) ~= "number" then return nil end
+    local ok, name = pcall(GetGameMessageInfo, messageType)
+    return ok and type(name) == "string" and name or nil
+end
+
+function ItemEngine:_OnUIError(_, messageType, message)
     local s = self.session
     if not s or type(message) ~= "string" or (issecretvalue and issecretvalue(message)) then return end
     s.errors = s.errors or {}
     s.errors[message] = (s.errors[message] or 0) + 1
     DWM:Debug("game error during a move: " .. message)
+    -- "You can't carry any more of those items": a unique item this character
+    -- already holds where the plan cannot see it (2026-10-23: Telemancy Orbs,
+    -- one in What's own bank). A re-send gets the same answer, so drop the
+    -- item for the rest of this run and go on with the next move.
+    local maxCount = ErrorName(messageType) == "ERR_ITEM_MAX_COUNT"
+        or (ERR_ITEM_MAX_COUNT ~= nil and message == ERR_ITEM_MAX_COUNT)
+    if maxCount and s.kind == "guild" and s.awaiting and s.lastItem then
+        s.skipItems = s.skipItems or {}
+        s.skipItems[s.lastItem] = true
+        s.awaiting, s.waitTicks, s.retries = false, 0, 0
+        s.moves = s.moves - 1
+        s.lastFeed = nil
+        DWM:Print(L["MSG_ITEM_SKIP_UNIQUE"]:format(ItemName(s.lastItem)))
+        self:_Arm(GUILD_GAP)
+    end
 end

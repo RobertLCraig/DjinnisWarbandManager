@@ -673,5 +673,34 @@ _G.C_Timer = nil
 ns.AHPlanData.posters, ns.AHPlanData.feeders = savedPosters, savedFeeders
 world.guildName = nil
 
+-- 21. A unique item the character already holds: the game says "You can't carry any more of
+-- those items". The run drops that item and goes on, instead of re-sending it until it stops
+-- (2026-10-23, Telemancy Orbs on What).
+reset(); freshDB()
+DWM.db.profile.enabled = true
+world.me = "What-Shadowsong"
+world.guildName = nil
+ns.guildBankOpen = true
+put(world.guild[2], 200, 1)
+_G.GetGameMessageInfo = function(t) return t == 7 and "ERR_ITEM_MAX_COUNT" or "OTHER" end
+do
+    local E = ns.ItemEngine
+    E:Run("panel", "guild")
+    local s = E.session
+    check("unique: the withdraw was sent", s and s.awaiting and s.lastItem == 200)
+    if s then
+        E:_OnUIError("UI_ERROR_MESSAGE", 3, "something else")
+        check("unique: another error does not skip", not s.skipItems and s.awaiting)
+        E:_OnUIError("UI_ERROR_MESSAGE", 7, "You can't carry any more of those items.")
+        check("unique: the item is skipped for this run", s.skipItems and s.skipItems[200] and not s.awaiting)
+        local left = false
+        for _, e in ipairs(E:_Plan("guild")) do if e.itemID == 200 then left = true end end
+        check("unique: the item is out of the plan", not left)
+    end
+    E.session = nil
+end
+_G.GetGameMessageInfo = nil
+ns.guildBankOpen = false
+
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)
